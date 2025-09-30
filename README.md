@@ -18,7 +18,16 @@ A lightweight Flask application to manage Salesforce org connections via OAuth 2
    pip install -r requirements.txt
    ```
 
-3. Set the Flask app and run the development server:
+3. (Optional) Use the helper script to create/activate a virtual environment,
+   install dependencies, and start the server automatically:
+
+   ```bash
+   ./setup_and_run.sh
+   ```
+
+   The script will create `./venv` if it does not already exist.
+
+4. To run the app manually, set the Flask app and start the development server:
 
    ```bash
    export FLASK_APP=app
