@@ -227,7 +227,10 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 },
             },
             "form": {"update_button": "Update org", "save_button": "Save org"},
-            "confirm": {"delete_org": "Delete org {orgId}?"},
+            "confirm": {
+                "delete_org": "Delete org {orgId}?",
+                "query_without_limit_where": "Are you sure you want to run a query without LIMIT nor WHERE?",
+            },
             "saved_queries": {"load": "Load", "delete": "Delete"},
             "autocomplete": {"insert": "Insert"},
             "history": {
@@ -456,7 +459,10 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 },
             },
             "form": {"update_button": "Aggiorna organizzazione", "save_button": "Salva organizzazione"},
-            "confirm": {"delete_org": "Eliminare l'organizzazione {orgId}?"},
+            "confirm": {
+                "delete_org": "Eliminare l'organizzazione {orgId}?",
+                "query_without_limit_where": "Sei sicuro di voler eseguire una query senza LIMIT né WHERE?",
+            },
             "saved_queries": {"load": "Carica", "delete": "Elimina"},
             "autocomplete": {"insert": "Inserisci"},
             "history": {

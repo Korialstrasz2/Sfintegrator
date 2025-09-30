@@ -9,7 +9,7 @@
   </head>
   <body class="theme-{{ current_theme }}">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
-      <div class="container">
+      <div class="container-xxl">
         <a class="navbar-brand" href="{{ url_for('main.index') }}">{{ t('nav.brand') }}</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
@@ -33,7 +33,7 @@
       </div>
     </nav>
 
-    <main class="container mb-5">
+    <main class="container-xxl mb-5">
       {% block content %}{% endblock %}
     </main>
 
