@@ -110,6 +110,65 @@ function getNormalizedSelectFieldSet(query = "") {
   return normalized;
 }
 
+function getFieldSuggestionRank(field, prefix = "") {
+  if (!prefix) {
+    return 0;
+  }
+  const normalizedPrefix = prefix.toLowerCase();
+  const name = field.name?.toLowerCase?.() ?? "";
+  const label = field.label?.toLowerCase?.() ?? "";
+  if (name.startsWith(normalizedPrefix) || label.startsWith(normalizedPrefix)) {
+    return 0;
+  }
+  if (name.includes(normalizedPrefix) || label.includes(normalizedPrefix)) {
+    return 1;
+  }
+  return 2;
+}
+
+function getSelectContext(query = "", cursor = 0) {
+  if (!query) {
+    return { inSelect: false, prefix: "" };
+  }
+
+  const normalizedCursor = Math.max(0, Math.min(Number(cursor) || 0, query.length));
+  const regex = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/gi;
+  let match;
+
+  while ((match = regex.exec(query)) !== null) {
+    const selectStart = match.index;
+    const fieldsStart = selectStart + match[1].length;
+    const fieldsEnd = fieldsStart + match[2].length;
+
+    if (normalizedCursor < selectStart) {
+      break;
+    }
+
+    if (normalizedCursor >= fieldsStart && normalizedCursor <= fieldsEnd) {
+      const beforeCursor = query.slice(fieldsStart, normalizedCursor);
+      const segment = beforeCursor.split(",").pop() ?? "";
+      const cleaned = segment.replace(/\r?\n/g, " ").trim();
+      let prefix = cleaned;
+
+      const asIndex = prefix.toUpperCase().indexOf(" AS ");
+      if (asIndex !== -1) {
+        prefix = prefix.slice(0, asIndex).trim();
+      }
+
+      if (prefix.includes(" ")) {
+        prefix = prefix.split(/\s+/)[0] ?? "";
+      }
+
+      return {
+        inSelect: true,
+        prefix,
+      };
+    }
+  }
+
+  return { inSelect: false, prefix: "" };
+}
+
 function formatTimestamp(isoString) {
   if (!isoString) return "";
   const date = new Date(isoString);
@@ -143,6 +202,24 @@ function bindQueryEditor() {
   const textarea = document.getElementById("soql-query");
   if (!textarea) return;
   textarea.addEventListener("input", () => refreshQueryEditorState());
+  textarea.addEventListener("click", () => updateFieldSuggestions());
+  textarea.addEventListener("focus", () => updateFieldSuggestions());
+  textarea.addEventListener("mouseup", () => updateFieldSuggestions());
+  textarea.addEventListener("keyup", (event) => {
+    const navigationKeys = [
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+    ];
+    if (navigationKeys.includes(event.key)) {
+      updateFieldSuggestions();
+    }
+  });
   refreshQueryEditorState();
 }
 
@@ -222,6 +299,8 @@ function updateFieldSuggestions() {
   const titleElement = container.querySelector(".suggestions-title");
   const query = textarea.value || "";
   const objectName = extractObjectNameFromQuery(query);
+  const cursor = textarea.selectionStart ?? query.length;
+  const context = getSelectContext(query, cursor);
 
   const hideSuggestions = (label) => {
     list.innerHTML = "";
@@ -232,7 +311,25 @@ function updateFieldSuggestions() {
     }
   };
 
-  if (!state.selectedOrg || !objectName) {
+  const updateTitle = () => {
+    if (!titleElement) return;
+    const baseTitle = container.dataset.labelTitle || "";
+    titleElement.textContent = objectName ? `${baseTitle} (${objectName})` : baseTitle;
+  };
+
+  const showEmptyState = (label) => {
+    list.innerHTML = "";
+    if (label) {
+      const emptyMessage = document.createElement("span");
+      emptyMessage.className = "text-muted small";
+      emptyMessage.textContent = label;
+      list.appendChild(emptyMessage);
+    }
+    updateTitle();
+    showElement(container, true);
+  };
+
+  if (!state.selectedOrg || !objectName || !context.inSelect) {
     hideSuggestions(container.dataset.labelTitle || "");
     return;
   }
@@ -244,17 +341,36 @@ function updateFieldSuggestions() {
   }
 
   const selectedFields = getNormalizedSelectFieldSet(query);
-  const suggestions = fields.filter(
-    (field) => !selectedFields.has(field.name.toLowerCase())
-  );
+  const normalizedPrefix = context.prefix.trim().toLowerCase();
+  let available = fields.filter((field) => !selectedFields.has(field.name.toLowerCase()));
 
-  if (!suggestions.length) {
-    hideSuggestions(container.dataset.labelEmpty || container.dataset.labelTitle || "");
+  if (normalizedPrefix) {
+    available = available.filter((field) => {
+      const name = field.name?.toLowerCase?.() ?? "";
+      const label = field.label?.toLowerCase?.() ?? "";
+      return name.includes(normalizedPrefix) || label.includes(normalizedPrefix);
+    });
+  }
+
+  if (!available.length) {
+    showEmptyState(container.dataset.labelEmpty || container.dataset.labelTitle || "");
     return;
   }
 
   list.innerHTML = "";
-  suggestions.slice(0, 12).forEach((field) => {
+  const suggestions = available
+    .slice()
+    .sort((a, b) => {
+      const rankA = getFieldSuggestionRank(a, normalizedPrefix);
+      const rankB = getFieldSuggestionRank(b, normalizedPrefix);
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    })
+    .slice(0, 12);
+
+  suggestions.forEach((field) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "btn btn-sm btn-outline-primary";
@@ -266,10 +382,7 @@ function updateFieldSuggestions() {
     list.appendChild(button);
   });
 
-  if (titleElement) {
-    const title = container.dataset.labelTitle || "";
-    titleElement.textContent = objectName ? `${title} (${objectName})` : title;
-  }
+  updateTitle();
 
   showElement(container, true);
 }
