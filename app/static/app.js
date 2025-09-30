@@ -2,6 +2,28 @@ const state = {
   selectedOrg: null,
 };
 
+function translate(key, params = {}) {
+  const parts = key.split(".");
+  let value = window.APP_TRANSLATIONS || {};
+  for (const part of parts) {
+    if (value && Object.prototype.hasOwnProperty.call(value, part)) {
+      value = value[part];
+    } else {
+      value = null;
+      break;
+    }
+  }
+  if (typeof value !== "string") {
+    return key;
+  }
+  return value.replace(/\{(\w+)\}/g, (match, name) => {
+    if (Object.prototype.hasOwnProperty.call(params, name)) {
+      return params[name];
+    }
+    return match;
+  });
+}
+
 function showToast(message, type = "success") {
   const container = document.createElement("div");
   container.className = `toast align-items-center text-bg-${type} border-0 position-fixed bottom-0 end-0 m-3`;
@@ -35,7 +57,7 @@ function bindOrgSelection() {
 function renderQueryResult(data) {
   const container = document.getElementById("query-result");
   if (!data || !data.records || data.records.length === 0) {
-    container.innerHTML = '<p class="text-muted">No records returned.</p>';
+    container.innerHTML = `<p class="text-muted">${translate("query.no_records")}</p>`;
     return;
   }
   const records = data.records;
@@ -72,11 +94,11 @@ function bindQueryForm() {
     event.preventDefault();
     const query = document.getElementById("soql-query").value.trim();
     if (!state.selectedOrg) {
-      showToast("Select an org before running a query", "warning");
+      showToast(translate("toast.select_org"), "warning");
       return;
     }
     if (!query) {
-      showToast("Enter a SOQL query", "warning");
+      showToast(translate("toast.enter_query"), "warning");
       return;
     }
     try {
@@ -87,7 +109,7 @@ function bindQueryForm() {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Query failed");
+        throw new Error(data.error || translate("toast.query_failed"));
       }
       renderQueryResult(data);
     } catch (error) {
@@ -113,7 +135,7 @@ function resetOrgForm(form) {
   form.reset();
   form.dataset.mode = "create";
   form.dataset.orgId = "";
-  document.getElementById("org-form-submit").textContent = "Save org";
+  document.getElementById("org-form-submit").textContent = translate("form.save_button");
   const environmentSelect = document.getElementById("org-environment");
   environmentSelect.value = "production";
   document.getElementById("org-custom-environment").value = "";
@@ -146,12 +168,12 @@ function bindOrgForm() {
     };
 
     if (!payload.id || !payload.label || !payload.client_id || !payload.redirect_uri || !payload.environment) {
-      showToast("Please fill all required fields", "warning");
+      showToast(translate("toast.fill_required"), "warning");
       return;
     }
 
     if (form.dataset.mode === "create" && !payload.client_secret) {
-      showToast("Enter the consumer secret for new orgs", "warning");
+      showToast(translate("toast.enter_secret"), "warning");
       return;
     }
 
@@ -167,9 +189,13 @@ function bindOrgForm() {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Unable to save org");
+        throw new Error(data.error || translate("toast.save_failed"));
       }
-      showToast(form.dataset.mode === "create" ? "Org created" : "Org updated");
+      showToast(
+        form.dataset.mode === "create"
+          ? translate("toast.org_created")
+          : translate("toast.org_updated")
+      );
       window.location.reload();
     } catch (error) {
       showToast(error.message, "danger");
@@ -189,7 +215,7 @@ function bindOrgForm() {
       document.getElementById("org-redirect-uri").value = row.dataset.redirectUri;
       document.getElementById("org-scope").value = row.dataset.scope;
       document.getElementById("org-client-secret").value = "";
-      document.getElementById("org-form-submit").textContent = "Update org";
+      document.getElementById("org-form-submit").textContent = translate("form.update_button");
       if (environment === "production" || environment === "sandbox") {
         environmentSelect.value = environment;
         customEnvironmentInput.value = "";
@@ -207,14 +233,14 @@ function bindOrgForm() {
       event.preventDefault();
       const row = button.closest("tr");
       const orgId = row.dataset.org;
-      if (!confirm(`Delete org ${orgId}?`)) return;
+      if (!confirm(translate("confirm.delete_org", { orgId }))) return;
       const response = await fetch(`/api/orgs/${orgId}`, { method: "DELETE" });
       if (response.ok) {
-        showToast("Org deleted", "info");
+        showToast(translate("toast.org_deleted"), "info");
         row.remove();
         resetOrgForm(form);
       } else {
-        showToast("Failed to delete org", "danger");
+        showToast(translate("toast.delete_failed"), "danger");
       }
     });
   });

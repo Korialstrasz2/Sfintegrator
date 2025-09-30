@@ -3,16 +3,52 @@ from __future__ import annotations
 import secrets
 import threading
 
+import json
+
 from flask import (Blueprint, Response, current_app, jsonify, redirect,
-                   render_template, request, url_for)
+                   render_template, request, session, url_for)
 
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .salesforce import (SalesforceError, build_authorize_url,
                          exchange_code_for_token, query, serialize_org)
+from .i18n import (DEFAULT_LANGUAGE, get_frontend_translations,
+                   get_language_codes, get_language_name, get_language_pack,
+                   translate)
 from .storage import OrgConfig, storage
 
 main_bp = Blueprint("main", __name__)
+
+
+@main_bp.app_context_processor
+def inject_i18n_context() -> dict[str, object]:
+    language = session.get("language", DEFAULT_LANGUAGE)
+
+    def _translate(key: str, **kwargs: str) -> str:
+        text = translate(key, language)
+        if kwargs:
+            try:
+                return text.format(**kwargs)
+            except (KeyError, ValueError):
+                return text
+        return text
+
+    language_pack = get_language_pack(language)
+    available_languages = [
+        {"code": code, "label": get_language_name(code)}
+        for code in get_language_codes()
+    ]
+    frontend_translations = json.dumps(
+        get_frontend_translations(language), ensure_ascii=False
+    )
+
+    return {
+        "t": _translate,
+        "current_language": language,
+        "available_languages": available_languages,
+        "language_pack": language_pack,
+        "frontend_translations_json": frontend_translations,
+    }
 
 
 def _state_serializer() -> URLSafeSerializer:
@@ -49,6 +85,19 @@ def manage_orgs() -> str:
 @main_bp.route("/guide")
 def guide() -> str:
     return render_template("guide.html")
+
+
+@main_bp.route("/settings", methods=["GET", "POST"])
+def settings() -> str:
+    if request.method == "POST":
+        language = request.form.get("language", DEFAULT_LANGUAGE)
+        if language not in get_language_codes():
+            language = DEFAULT_LANGUAGE
+        session["language"] = language
+        return redirect(url_for("main.settings", saved=1))
+
+    saved = request.args.get("saved") == "1"
+    return render_template("settings.html", language_saved=saved)
 
 
 @main_bp.route("/api/orgs", methods=["GET"])

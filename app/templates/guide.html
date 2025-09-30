@@ -1,50 +1,47 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set guide = language_pack['guide'] %}
+{% set sections = guide['sections'] %}
 <div class="card shadow-sm">
   <div class="card-body">
-    <h3 class="card-title">Salesforce OAuth Integration Checklist</h3>
-    <p class="text-muted">Follow these steps to connect this app with your Salesforce org.</p>
+    <h3 class="card-title">{{ guide['title'] }}</h3>
+    <p class="text-muted">{{ guide['subtitle'] }}</p>
 
-    <h5>1. Prepare Salesforce</h5>
+    <h5>{{ sections['prepare']['title'] }}</h5>
     <ol>
-      <li>Sign in to the Salesforce org that you want to integrate.</li>
-      <li>Navigate to <strong>Setup &gt; Apps &gt; App Manager</strong> and click <strong>New Connected App</strong> (Lightning Experience) rather than <em>New Lightning App</em> or <em>New External Client App</em>.</li>
-      <li>Fill out the basic information section: enter a descriptive <strong>Connected App Name</strong>, allow Salesforce to auto-populate the <strong>API Name</strong>, and provide a <strong>Contact Email</strong>; the remaining optional fields can stay blank unless your org requires them.</li>
-      <li>Enable <strong>OAuth Settings for API Integration</strong> to reveal the integration options.</li>
-      <li>Within the OAuth settings, leave <strong>Require Secret for Web Server Flow</strong> checked, keep the default <strong>Selected OAuth Scopes</strong> list empty for now, and skip optional fields such as <em>Start URL</em> or <em>Callback URL for Lightning Apps</em>.</li>
-      <li>Set the primary <strong>Callback URL</strong> to <code>http://localhost:5000/oauth/callback</code> for local development; when deploying, replace <code>localhost:5000</code> with your host name while keeping the path <code>/oauth/callback</code>.</li>
-      <li>Add the following OAuth scopes to the <strong>Selected OAuth Scopes</strong> list: <code>Full access (full)</code> and <code>Perform requests on your behalf at any time (refresh_token, offline_access)</code>. Other scopes can remain unselected unless your integration needs them.</li>
-      <li>Save the connected app and copy the <strong>Consumer Key</strong> and <strong>Consumer Secret</strong>.</li>
-      <li>Under <strong>Manage &gt; OAuth Policies</strong>, ensure that the refresh token policy allows refresh token usage.</li>
+      {% for step in sections['prepare']['steps'] %}
+        <li>{{ step|format(org_config_url=url_for('main.manage_orgs'), query_url=url_for('main.index'))|safe }}</li>
+      {% endfor %}
     </ol>
 
-    <h5>2. Configure the integrator</h5>
+    <h5>{{ sections['configure']['title'] }}</h5>
     <ol>
-      <li>Open the <a href="{{ url_for('main.manage_orgs') }}">Org Configuration</a> page.</li>
-      <li>Fill in the form with:
-        <ul>
-          <li><strong>Org ID</strong>: an internal identifier such as <code>prod</code> or <code>dev</code>.</li>
-          <li><strong>Display name</strong>: friendly name shown in the UI.</li>
-          <li><strong>Environment</strong>: choose Production, Sandbox, or enter your custom My Domain URL.</li>
-          <li><strong>Consumer Key</strong> and <strong>Consumer Secret</strong> from the connected app.</li>
-          <li><strong>Redirect URI</strong>: must match the callback URL configured in Salesforce.</li>
-          <li><strong>OAuth Scope</strong>: default is <code>full refresh_token</code>; adjust if needed.</li>
-        </ul>
-      </li>
-      <li>Click <strong>Save org</strong>.</li>
-      <li>Use the <strong>Connect</strong> button in the table to start OAuth authorization.</li>
-      <li>Grant access in Salesforce when prompted; you will be redirected back to the app.</li>
+      {% for step in sections['configure']['steps'] %}
+        {% set formatted_step = step|format(org_config_url=url_for('main.manage_orgs')) %}
+        <li>
+          {% if loop.index == 2 %}
+            {{ formatted_step|safe }}
+            <ul>
+              {% for detail in sections['configure']['form_details'] %}
+                <li>{{ detail|safe }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            {{ formatted_step|safe }}
+          {% endif %}
+        </li>
+      {% endfor %}
     </ol>
 
-    <h5>3. Run SOQL queries</h5>
+    <h5>{{ sections['query']['title'] }}</h5>
     <ol>
-      <li>Return to the <a href="{{ url_for('main.index') }}">Query</a> page.</li>
-      <li>Select the org you just authorized and paste a SOQL query, e.g. <code>SELECT Id, Name FROM Account LIMIT 10</code>.</li>
-      <li>Click <strong>Run query</strong> to execute. Results appear in a table below the form.</li>
+      {% for step in sections['query']['steps'] %}
+        <li>{{ step|format(query_url=url_for('main.index'))|safe }}</li>
+      {% endfor %}
     </ol>
 
     <div class="alert alert-info mt-4">
-      <strong>Tip:</strong> For local development, set your callback URL to <code>http://localhost:5000/oauth/callback</code> and add it to the connected app's list of allowed callbacks. When deploying, update the host name to match your environment but keep the path <code>/oauth/callback</code> so the redirect completes successfully.
+      <strong>{{ guide['tip']['title'] }}</strong> {{ guide['tip']['content']|safe }}
     </div>
   </div>
 </div>
