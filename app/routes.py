@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import secrets
 
-from flask import (Blueprint, Response, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (Blueprint, Response, current_app, jsonify, redirect,
+                   render_template, request, url_for)
+
+from itsdangerous import BadSignature, URLSafeSerializer
 
 from .salesforce import (SalesforceError, build_authorize_url,
                          exchange_code_for_token, query, serialize_org)
 from .storage import OrgConfig, storage
 
 main_bp = Blueprint("main", __name__)
+
+
+def _state_serializer() -> URLSafeSerializer:
+    secret_key = current_app.config.get("SECRET_KEY")
+    return URLSafeSerializer(secret_key, salt="oauth-state")
 
 
 @main_bp.route("/")
@@ -87,23 +94,32 @@ def start_auth(org_id: str):
     org = storage.get(org_id)
     if not org:
         return jsonify({"error": "Unknown org"}), 404
-    state = secrets.token_urlsafe(24)
-    session["oauth_state"] = state
-    session["oauth_org_id"] = org_id
-    return redirect(build_authorize_url(org, state))
+    state_payload = {"org_id": org_id, "nonce": secrets.token_urlsafe(24)}
+    state_token = _state_serializer().dumps(state_payload)
+    return redirect(build_authorize_url(org, state_token))
 
 
 @main_bp.route("/oauth/callback")
 def oauth_callback():
+    error = request.args.get("error")
+    if error:
+        description = request.args.get("error_description")
+        message = description or f"Salesforce authorization failed: {error}"
+        return jsonify({"error": message}), 400
+
     state = request.args.get("state")
     code = request.args.get("code")
     if not state or not code:
         return jsonify({"error": "Missing state or code"}), 400
 
-    expected_state = session.get("oauth_state")
-    org_id = session.get("oauth_org_id")
-    if not expected_state or state != expected_state or not org_id:
-        return jsonify({"error": "Invalid session state"}), 400
+    try:
+        state_data = _state_serializer().loads(state, max_age=600)
+    except BadSignature:
+        return jsonify({"error": "Invalid or expired state"}), 400
+
+    org_id = state_data.get("org_id")
+    if not org_id:
+        return jsonify({"error": "Invalid state payload"}), 400
 
     org = storage.get(org_id)
     if not org:
