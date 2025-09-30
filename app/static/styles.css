@@ -163,7 +163,7 @@ body.theme-sci-fi {
 .saved-query-list,
 .metadata-list,
 .query-history-list {
-  max-height: 250px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
@@ -201,4 +201,22 @@ body.theme-sci-fi {
     position: sticky;
     top: 1rem;
   }
+}
+
+.sidebar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.sidebar-tools-card .nav-tabs .nav-link {
+  white-space: nowrap;
+}
+
+.sidebar-tools-card .tab-content {
+  padding-top: 1rem;
+}
+
+.sidebar-tools-card .tab-pane > :last-child {
+  margin-bottom: 0;
 }
