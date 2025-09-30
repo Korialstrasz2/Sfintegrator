@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import re
 import threading
-from dataclasses import dataclass, asdict
+import uuid
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ORGS_DATA_FILE = DATA_DIR / "orgs.json"
 SAVED_QUERIES_DATA_FILE = DATA_DIR / "saved_queries.json"
+QUERY_HISTORY_DATA_FILE = DATA_DIR / "query_history.json"
 
 _lock = threading.Lock()
 
@@ -134,12 +137,72 @@ class SavedQueryStorage:
         return list(self.load_all().values())
 
 
+@dataclass
+class QueryHistoryEntry:
+    id: str
+    org_id: str
+    soql: str
+    object_name: Optional[str]
+    executed_at: str
+
+
+class QueryHistoryStorage:
+    max_entries: int = 1000
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def load_all(self) -> List[QueryHistoryEntry]:
+        if not self.path.exists():
+            return []
+        with self.path.open("r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        return [QueryHistoryEntry(**item) for item in raw]
+
+    def save_all(self, entries: List[QueryHistoryEntry]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("w", encoding="utf-8") as fh:
+            json.dump([asdict(entry) for entry in entries], fh, indent=2, sort_keys=True)
+
+    def add(self, org_id: str, soql: str, object_name: Optional[str]) -> QueryHistoryEntry:
+        with _lock:
+            entries = self.load_all()
+            entry = QueryHistoryEntry(
+                id=uuid.uuid4().hex,
+                org_id=org_id,
+                soql=soql,
+                object_name=object_name,
+                executed_at=datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            )
+            entries.append(entry)
+            if len(entries) > self.max_entries:
+                entries = entries[-self.max_entries :]
+            self.save_all(entries)
+            return entry
+
+    def list(self, object_name: Optional[str] = None) -> List[QueryHistoryEntry]:
+        entries = self.load_all()
+        if object_name:
+            entries = [
+                entry
+                for entry in entries
+                if entry.object_name and entry.object_name.lower() == object_name.lower()
+            ]
+        return list(reversed(entries))
+
+    def list_objects(self) -> List[str]:
+        entries = self.load_all()
+        objects = {entry.object_name for entry in entries if entry.object_name}
+        return sorted(objects, key=lambda value: value.lower())
+
+
 def ensure_storage() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for path in (ORGS_DATA_FILE, SAVED_QUERIES_DATA_FILE):
+    for path in (ORGS_DATA_FILE, SAVED_QUERIES_DATA_FILE, QUERY_HISTORY_DATA_FILE):
         if not path.exists():
             path.write_text("[]", encoding="utf-8")
 
 
 storage = OrgStorage(ORGS_DATA_FILE)
 saved_queries_storage = SavedQueryStorage(SAVED_QUERIES_DATA_FILE)
+query_history_storage = QueryHistoryStorage(QUERY_HISTORY_DATA_FILE)

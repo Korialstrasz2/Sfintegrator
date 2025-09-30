@@ -135,17 +135,37 @@ body.theme-sci-fi {
 }
 
 .saved-query-list,
-.metadata-list {
+.metadata-list,
+.query-history-list {
   max-height: 250px;
   overflow-y: auto;
 }
 
 .metadata-list .list-group-item,
-.saved-query-list .list-group-item {
+.saved-query-list .list-group-item,
+.query-history-list .list-group-item {
   cursor: pointer;
 }
 
 .metadata-list .list-group-item.active {
   background-color: rgba(13, 110, 253, 0.1);
   border-color: #0d6efd;
+}
+
+.field-suggestions-bar {
+  border: 1px solid rgba(13, 110, 253, 0.2);
+  background-color: rgba(13, 110, 253, 0.05);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.field-suggestions-bar .btn {
+  white-space: nowrap;
+}
+
+.theme-dark .field-suggestions-bar,
+.theme-sci-fi .field-suggestions-bar {
+  background-color: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.35);
 }
