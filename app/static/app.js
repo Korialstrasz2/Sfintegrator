@@ -989,6 +989,19 @@ function bindQueryForm() {
       showToast(translate("toast.enter_query"), "warning");
       return;
     }
+
+    const hasLimit = /\bLIMIT\b/i.test(query);
+    const hasWhere = /\bWHERE\b/i.test(query);
+    if (!hasLimit && !hasWhere) {
+      const message = translate("frontend.confirm.query_without_limit_where");
+      if (typeof window.confirm === "function") {
+        const shouldProceed = window.confirm(message);
+        if (!shouldProceed) {
+          return;
+        }
+      }
+    }
+
     try {
       const response = await fetch("/api/query", {
         method: "POST",
