@@ -134,6 +134,32 @@ body.theme-sci-fi {
   min-height: 150px;
 }
 
+#query-result .query-result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#query-result .query-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#query-result .query-result-table {
+  max-height: 80vh;
+  overflow: auto;
+  border: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.1));
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  background-color: var(--bs-body-bg, #ffffff);
+}
+
+#query-result .query-result-table table {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
 .saved-query-list,
 .metadata-list,
 .query-history-list {

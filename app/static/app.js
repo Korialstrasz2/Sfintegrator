@@ -13,6 +13,11 @@ const state = {
     objects: [],
     filter: "",
   },
+  queryResult: {
+    columns: [],
+    records: [],
+    queryFields: [],
+  },
 };
 
 const FROM_REGEX = /\bFROM\s+([a-zA-Z0-9_.]+)/i;
@@ -196,6 +201,215 @@ function refreshQueryEditorState() {
     }
   }
   updateFieldSuggestions();
+}
+
+function deriveColumnKey(field = "") {
+  if (!field) return "";
+  const trimmed = String(field).trim();
+  if (!trimmed) return "";
+
+  const asParts = trimmed.split(/\s+AS\s+/i);
+  if (asParts.length > 1) {
+    const alias = asParts.pop()?.trim();
+    if (alias) {
+      return alias.replace(/,+$/, "");
+    }
+  }
+
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length > 1) {
+    const alias = tokens[tokens.length - 1]?.trim();
+    if (alias) {
+      return alias.replace(/,+$/, "");
+    }
+  }
+
+  return trimmed.replace(/,+$/, "");
+}
+
+function formatDisplayValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function hasQueryResults() {
+  return Array.isArray(state.queryResult?.records) && state.queryResult.records.length > 0;
+}
+
+function bindResultActions(container) {
+  const actionsContainer = container.querySelector(".query-result-actions");
+  if (!actionsContainer) {
+    return;
+  }
+
+  const actionHandlers = {
+    "copy-csv": copyResultAsCsv,
+    "copy-excel": copyResultAsExcel,
+    "export-csv": exportResultAsCsv,
+    "export-excel": exportResultAsExcel,
+  };
+
+  actionsContainer.querySelectorAll("[data-action]").forEach((button) => {
+    const action = button.dataset.action;
+    const handler = actionHandlers[action];
+    if (typeof handler === "function") {
+      button.addEventListener("click", handler);
+    }
+  });
+}
+
+function copyResultAsCsv() {
+  if (!hasQueryResults()) {
+    showToast(translate("frontend.toast.no_results_available"), "info");
+    return;
+  }
+  const content = createCsvContent(state.queryResult.columns, state.queryResult.records);
+  copyToClipboard(content)
+    .then(() => showToast(translate("frontend.toast.results_copy_csv_success"), "success"))
+    .catch(() => showToast(translate("frontend.toast.results_copy_failed"), "danger"));
+}
+
+function copyResultAsExcel() {
+  if (!hasQueryResults()) {
+    showToast(translate("frontend.toast.no_results_available"), "info");
+    return;
+  }
+  const content = createTsvContent(state.queryResult.columns, state.queryResult.records);
+  copyToClipboard(content)
+    .then(() => showToast(translate("frontend.toast.results_copy_excel_success"), "success"))
+    .catch(() => showToast(translate("frontend.toast.results_copy_failed"), "danger"));
+}
+
+function exportResultAsCsv() {
+  if (!hasQueryResults()) {
+    showToast(translate("frontend.toast.no_results_available"), "info");
+    return;
+  }
+  try {
+    const content = createCsvContent(state.queryResult.columns, state.queryResult.records);
+    downloadFile(content, "query-results.csv", "text/csv;charset=utf-8;");
+    showToast(translate("frontend.toast.results_export_ready_csv"), "success");
+  } catch (error) {
+    showToast(translate("frontend.toast.results_export_failed"), "danger");
+  }
+}
+
+function exportResultAsExcel() {
+  if (!hasQueryResults()) {
+    showToast(translate("frontend.toast.no_results_available"), "info");
+    return;
+  }
+  try {
+    const content = createTsvContent(state.queryResult.columns, state.queryResult.records);
+    downloadFile(content, "query-results.xls", "application/vnd.ms-excel;charset=utf-8;");
+    showToast(translate("frontend.toast.results_export_ready_excel"), "success");
+  } catch (error) {
+    showToast(translate("frontend.toast.results_export_failed"), "danger");
+  }
+}
+
+function createCsvContent(columns, records) {
+  const header = columns.map((column) => formatExportValue(column));
+  const rows = [
+    header,
+    ...records.map((record) => columns.map((column) => formatExportValue(record[column]))),
+  ].map((row) => row.map(escapeForCsv).join(","));
+  return rows.join("\n");
+}
+
+function createTsvContent(columns, records) {
+  const header = columns.map((column) => formatExportValue(column));
+  const rows = [
+    header,
+    ...records.map((record) => columns.map((column) => formatExportValue(record[column]))),
+  ].map((row) => row.map(escapeForTsv).join("\t"));
+  return rows.join("\n");
+}
+
+function formatExportValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function escapeForCsv(value) {
+  const needsEscaping = /[",\n\r]/.test(value);
+  if (needsEscaping) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function escapeForTsv(value) {
+  return value.replace(/\t/g, " ");
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    return navigator.clipboard.writeText(text);
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      const selection = document.getSelection();
+      const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+      textarea.select();
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (selectedRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(selectedRange);
+      }
+      if (successful) {
+        resolve();
+      } else {
+        reject(new Error("copy command unsuccessful"));
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function bindQueryEditor() {
@@ -406,23 +620,84 @@ function bindOrgSelection() {
 function renderQueryResult(data) {
   const container = document.getElementById("query-result");
   if (!container) return;
-  if (!data || !data.records || data.records.length === 0) {
+  if (!data || !Array.isArray(data.records) || data.records.length === 0) {
+    state.queryResult = { columns: [], records: [], queryFields: [] };
     container.innerHTML = `<p class="text-muted">${translate("query.no_records")}</p>`;
     return;
   }
+
   const records = data.records;
-  const columns = Object.keys(records[0]);
-  const headerRow = columns.map((col) => `<th>${col}</th>`).join("");
+  const queryFields = Array.isArray(data.queryFields) ? data.queryFields : state.queryResult.queryFields;
+  const allColumns = new Set();
+  records.forEach((record) => {
+    Object.keys(record || {}).forEach((key) => {
+      if (key !== "attributes") {
+        allColumns.add(key);
+      }
+    });
+  });
+
+  const remainingColumns = new Set(allColumns);
+  const orderedColumns = [];
+
+  if (Array.isArray(queryFields)) {
+    queryFields.forEach((field) => {
+      const key = deriveColumnKey(field);
+      if (key && remainingColumns.has(key)) {
+        orderedColumns.push(key);
+        remainingColumns.delete(key);
+      }
+    });
+  }
+
+  remainingColumns.forEach((key) => {
+    if (!orderedColumns.includes(key)) {
+      orderedColumns.push(key);
+    }
+  });
+
+  state.queryResult = {
+    columns: orderedColumns,
+    records,
+    queryFields: queryFields || [],
+  };
+
+  const headerRow = orderedColumns.map((col) => `<th scope="col">${escapeHtml(col)}</th>`).join("");
   const rows = records
-    .map((record) => `<tr>${columns.map((col) => `<td>${escapeHtml(record[col])}</td>`).join("")}</tr>`)
+    .map((record) => {
+      const cells = orderedColumns
+        .map((col) => `<td>${escapeHtml(formatDisplayValue(record[col]))}</td>`)
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
     .join("");
 
   container.innerHTML = `
-    <table class="table table-striped">
-      <thead><tr>${headerRow}</tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div class="query-result-panel">
+      <div class="query-result-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="copy-csv">
+          ${translate("query.results.copy_csv")}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="copy-excel">
+          ${translate("query.results.copy_excel")}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-action="export-csv">
+          ${translate("query.results.export_csv")}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-action="export-excel">
+          ${translate("query.results.export_excel")}
+        </button>
+      </div>
+      <div class="query-result-table">
+        <table class="table table-striped table-hover">
+          <thead><tr>${headerRow}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
   `;
+
+  bindResultActions(container);
 }
 
 function escapeHtml(value) {
@@ -501,7 +776,8 @@ function bindQueryForm() {
       if (!response.ok) {
         throw new Error(data.error || translate("toast.query_failed"));
       }
-      renderQueryResult(data);
+      const queryFields = getSelectFields(query);
+      renderQueryResult({ ...data, queryFields });
       loadQueryHistory(state.queryHistory.filter);
     } catch (error) {
       const message = error instanceof Error ? error.message : translate("toast.query_failed");
