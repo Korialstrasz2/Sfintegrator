@@ -23,6 +23,57 @@ const state = {
 const FROM_REGEX = /\bFROM\s+([a-zA-Z0-9_.]+)/i;
 const SELECT_REGEX = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/i;
 
+const DEFAULT_QUERY = "SELECT Id\nFROM Account";
+const KEYWORD_PATTERNS = [
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "GROUP BY",
+  "HAVING",
+  "ORDER BY",
+  "LIMIT",
+  "OFFSET",
+];
+
+function placeKeywordsOnNewLines(value = "") {
+  if (!value) {
+    return "";
+  }
+  let formatted = value.replace(/\r\n/g, "\n");
+  KEYWORD_PATTERNS.forEach((pattern) => {
+    const regex = new RegExp(`\\s*\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "gi");
+    formatted = formatted.replace(regex, (match, offset) => {
+      const prefix = offset === 0 ? "" : "\n";
+      return `${prefix}${pattern}`;
+    });
+  });
+  formatted = formatted.replace(/[ \t]+\n/g, "\n");
+  formatted = formatted.replace(/\n{3,}/g, "\n\n");
+  return formatted;
+}
+
+function applyKeywordFormatting(textarea, options = {}) {
+  if (!textarea) return;
+  const preserveCursor = options?.preserveCursor ?? true;
+  const originalValue = textarea.value || "";
+  const formattedValue = placeKeywordsOnNewLines(originalValue);
+  if (formattedValue === originalValue) {
+    return;
+  }
+  if (!preserveCursor) {
+    textarea.value = formattedValue;
+    return;
+  }
+  const selectionStart = textarea.selectionStart ?? originalValue.length;
+  const beforeCursor = originalValue.slice(0, selectionStart);
+  const formattedBeforeCursor = placeKeywordsOnNewLines(beforeCursor);
+  textarea.value = formattedValue;
+  const cursorPosition = formattedBeforeCursor.length;
+  if (typeof textarea.setSelectionRange === "function") {
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }
+}
+
 function translate(key, params = {}) {
   const parts = key.split(".");
   let value = window.APP_TRANSLATIONS || {};
@@ -415,7 +466,14 @@ function downloadFile(content, filename, mimeType) {
 function bindQueryEditor() {
   const textarea = document.getElementById("soql-query");
   if (!textarea) return;
-  textarea.addEventListener("input", () => refreshQueryEditorState());
+  if (!textarea.value.trim()) {
+    textarea.value = DEFAULT_QUERY;
+  }
+  applyKeywordFormatting(textarea, { preserveCursor: false });
+  textarea.addEventListener("input", () => {
+    applyKeywordFormatting(textarea);
+    refreshQueryEditorState();
+  });
   textarea.addEventListener("click", () => updateFieldSuggestions());
   textarea.addEventListener("focus", () => updateFieldSuggestions());
   textarea.addEventListener("mouseup", () => updateFieldSuggestions());
@@ -727,28 +785,89 @@ function insertIntoQuery(snippet) {
   const cursorPosition = before.length + insertion.length;
   textarea.focus();
   textarea.setSelectionRange(cursorPosition, cursorPosition);
+  applyKeywordFormatting(textarea);
   refreshQueryEditorState();
 }
 
-function addClauseToQuery(clause) {
+function addLimitClause(limitClause = "LIMIT 100") {
   const textarea = document.getElementById("soql-query");
   if (!textarea) return;
-  const clauseUpper = clause.toUpperCase();
+  applyKeywordFormatting(textarea, { preserveCursor: false });
+  const clauseUpper = limitClause.toUpperCase();
   if (textarea.value.toUpperCase().includes(clauseUpper)) {
-    showToast(translate("toast.clause_exists", { clause }), "info");
+    showToast(translate("toast.clause_exists", { clause: limitClause }), "info");
     return;
   }
-  insertIntoQuery(clause);
+  const query = textarea.value || "";
+  const offsetMatch = query.match(/\bOFFSET\b/i);
+  const insertionIndex = offsetMatch ? offsetMatch.index : query.length;
+  const before = query.slice(0, insertionIndex).replace(/\s+$/, "");
+  const after = query.slice(insertionIndex).replace(/^\s*/, "");
+  const segments = [];
+  if (before) {
+    segments.push(before);
+  }
+  segments.push(limitClause);
+  if (after) {
+    segments.push(after);
+  }
+  textarea.value = placeKeywordsOnNewLines(segments.join("\n"));
+  const clauseIndex = textarea.value.indexOf(limitClause);
+  const cursorPosition = clauseIndex >= 0 ? clauseIndex + limitClause.length : textarea.value.length;
+  textarea.focus();
+  if (typeof textarea.setSelectionRange === "function") {
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }
+  refreshQueryEditorState();
+}
+
+function addOrderByClause(orderByClause = "ORDER BY CreatedDate DESC") {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  applyKeywordFormatting(textarea, { preserveCursor: false });
+  const clauseUpper = orderByClause.toUpperCase();
+  if (textarea.value.toUpperCase().includes(clauseUpper)) {
+    showToast(translate("toast.clause_exists", { clause: orderByClause }), "info");
+    return;
+  }
+  const query = textarea.value || "";
+  let insertionIndex = query.length;
+  const limitMatch = query.match(/\bLIMIT\b/i);
+  if (limitMatch && limitMatch.index < insertionIndex) {
+    insertionIndex = limitMatch.index;
+  }
+  const offsetMatch = query.match(/\bOFFSET\b/i);
+  if (offsetMatch && offsetMatch.index < insertionIndex) {
+    insertionIndex = offsetMatch.index;
+  }
+  const before = query.slice(0, insertionIndex).replace(/\s+$/, "");
+  const after = query.slice(insertionIndex).replace(/^\s*/, "");
+  const segments = [];
+  if (before) {
+    segments.push(before);
+  }
+  segments.push(orderByClause);
+  if (after) {
+    segments.push(after);
+  }
+  textarea.value = placeKeywordsOnNewLines(segments.join("\n"));
+  const clauseIndex = textarea.value.indexOf(orderByClause);
+  const cursorPosition = clauseIndex >= 0 ? clauseIndex + orderByClause.length : textarea.value.length;
+  textarea.focus();
+  if (typeof textarea.setSelectionRange === "function") {
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }
+  refreshQueryEditorState();
 }
 
 function bindSnippetButtons() {
   const limitButton = document.getElementById("add-limit");
   if (limitButton) {
-    limitButton.addEventListener("click", () => addClauseToQuery("LIMIT 100"));
+    limitButton.addEventListener("click", () => addLimitClause());
   }
   const orderByButton = document.getElementById("add-order-by");
   if (orderByButton) {
-    orderByButton.addEventListener("click", () => addClauseToQuery("ORDER BY Created DESC"));
+    orderByButton.addEventListener("click", () => addOrderByClause());
   }
 }
 
@@ -909,6 +1028,7 @@ function loadSavedQueryIntoForm(saved) {
   nameInput.value = saved.label;
   idInput.value = saved.id;
   queryInput.value = saved.soql;
+  applyKeywordFormatting(queryInput, { preserveCursor: false });
   queryInput.focus();
   refreshQueryEditorState();
   const submitButton = document.getElementById("saved-query-submit");
@@ -1053,6 +1173,7 @@ function renderQueryHistory() {
       const textarea = document.getElementById("soql-query");
       if (!textarea) return;
       textarea.value = entry.soql;
+      applyKeywordFormatting(textarea, { preserveCursor: false });
       textarea.focus();
       refreshQueryEditorState();
     });
