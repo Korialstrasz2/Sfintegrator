@@ -8,7 +8,15 @@ const state = {
     selectedObject: null,
     filter: "",
   },
+  queryHistory: {
+    entries: [],
+    objects: [],
+    filter: "",
+  },
 };
+
+const FROM_REGEX = /\bFROM\s+([a-zA-Z0-9_.]+)/i;
+const SELECT_REGEX = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/i;
 
 function translate(key, params = {}) {
   const parts = key.split(".");
@@ -57,6 +65,213 @@ function showElement(element, shouldShow) {
   } else {
     element.classList.add("d-none");
   }
+}
+
+function extractObjectNameFromQuery(query = "") {
+  if (!query) return null;
+  const match = query.match(FROM_REGEX);
+  return match ? match[1] : null;
+}
+
+function getSelectFields(query = "") {
+  if (!query) return [];
+  const match = query.match(SELECT_REGEX);
+  if (!match) return [];
+  return match[2]
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function normalizeFieldName(field = "") {
+  let value = field.trim();
+  if (!value) return "";
+  const asParts = value.split(/\s+AS\s+/i);
+  if (asParts.length > 1) {
+    value = asParts[0].trim();
+  } else {
+    const tokens = value.split(/\s+/);
+    if (tokens.length > 1) {
+      value = tokens[0].trim();
+    }
+  }
+  return value.toLowerCase();
+}
+
+function getNormalizedSelectFieldSet(query = "") {
+  const fields = getSelectFields(query);
+  const normalized = new Set();
+  fields.forEach((field) => {
+    const value = normalizeFieldName(field);
+    if (value) {
+      normalized.add(value);
+    }
+  });
+  return normalized;
+}
+
+function formatTimestamp(isoString) {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return isoString;
+  }
+  const locale = window.APP_LANGUAGE || undefined;
+  try {
+    return date.toLocaleString(locale);
+  } catch (error) {
+    return date.toLocaleString();
+  }
+}
+
+function refreshQueryEditorState() {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  const query = textarea.value || "";
+  const objectName = extractObjectNameFromQuery(query);
+  if (objectName && state.selectedOrg) {
+    if (state.metadata.selectedObject !== objectName) {
+      selectObject(objectName, { silent: true });
+    } else if (!state.metadata.fields[objectName]) {
+      loadFieldsForObject(objectName);
+    }
+  }
+  updateFieldSuggestions();
+}
+
+function bindQueryEditor() {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  textarea.addEventListener("input", () => refreshQueryEditorState());
+  refreshQueryEditorState();
+}
+
+function addFieldToSelectClause(fieldName) {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea || !fieldName) return;
+  const query = textarea.value || "";
+  const normalizedField = fieldName.trim().toLowerCase();
+  if (!normalizedField) return;
+
+  const container = document.getElementById("query-field-suggestions");
+  const selectedFields = getNormalizedSelectFieldSet(query);
+  if (selectedFields.has(normalizedField)) {
+    const template = container?.dataset.labelFieldExists;
+    if (template) {
+      showToast(template.replace("{field}", fieldName), "info");
+    } else {
+      showToast(translate("toast.field_already_selected", { field: fieldName }), "info");
+    }
+    return;
+  }
+
+  const match = query.match(SELECT_REGEX);
+  if (!match) {
+    const fromMatch = query.match(FROM_REGEX);
+    if (fromMatch) {
+      const beforeFrom = query.slice(0, fromMatch.index);
+      const afterFrom = query.slice(fromMatch.index);
+      const needsSpaceBefore = beforeFrom.length > 0 && !/\s$/.test(beforeFrom);
+      const prefix = needsSpaceBefore ? `${beforeFrom} ` : beforeFrom;
+      const updatedQuery = `${prefix}SELECT ${fieldName} ${afterFrom}`;
+      textarea.value = updatedQuery;
+      textarea.focus();
+      refreshQueryEditorState();
+      return;
+    }
+    insertIntoQuery(fieldName);
+    return;
+  }
+
+  const before = query.slice(0, match.index);
+  const selectKeyword = match[1];
+  const existingFields = match[2];
+  const fromKeyword = match[3];
+  const after = query.slice(match.index + match[0].length);
+
+  const trimmedFields = existingFields.trim();
+  const values = trimmedFields
+    ? existingFields
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+  values.push(fieldName);
+
+  let newFieldsSegment;
+  if (existingFields.includes("\n")) {
+    const indentMatch = existingFields.match(/\n(\s*)\S/);
+    const indent = indentMatch ? indentMatch[1] : "  ";
+    newFieldsSegment = `\n${indent}${values.join(`,\n${indent}`)}\n`;
+  } else {
+    newFieldsSegment = values.join(", ");
+  }
+
+  const updatedQuery = `${before}${selectKeyword}${newFieldsSegment}${fromKeyword}${after}`;
+  textarea.value = updatedQuery;
+  textarea.focus();
+  refreshQueryEditorState();
+}
+
+function updateFieldSuggestions() {
+  const container = document.getElementById("query-field-suggestions");
+  const list = document.getElementById("query-field-suggestions-list");
+  if (!container || !list) return;
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  const titleElement = container.querySelector(".suggestions-title");
+  const query = textarea.value || "";
+  const objectName = extractObjectNameFromQuery(query);
+
+  const hideSuggestions = (label) => {
+    list.innerHTML = "";
+    showElement(container, false);
+    if (titleElement) {
+      const fallback = container.dataset.labelTitle || "";
+      titleElement.textContent = label ?? fallback;
+    }
+  };
+
+  if (!state.selectedOrg || !objectName) {
+    hideSuggestions(container.dataset.labelTitle || "");
+    return;
+  }
+
+  const fields = state.metadata.fields[objectName] || [];
+  if (!fields.length) {
+    hideSuggestions(container.dataset.labelEmpty || container.dataset.labelTitle || "");
+    return;
+  }
+
+  const selectedFields = getNormalizedSelectFieldSet(query);
+  const suggestions = fields.filter(
+    (field) => !selectedFields.has(field.name.toLowerCase())
+  );
+
+  if (!suggestions.length) {
+    hideSuggestions(container.dataset.labelEmpty || container.dataset.labelTitle || "");
+    return;
+  }
+
+  list.innerHTML = "";
+  suggestions.slice(0, 12).forEach((field) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-sm btn-outline-primary";
+    button.textContent = field.name;
+    if (field.label && field.label !== field.name) {
+      button.title = field.label;
+    }
+    button.addEventListener("click", () => addFieldToSelectClause(field.name));
+    list.appendChild(button);
+  });
+
+  if (titleElement) {
+    const title = container.dataset.labelTitle || "";
+    titleElement.textContent = objectName ? `${title} (${objectName})` : title;
+  }
+
+  showElement(container, true);
 }
 
 function bindOrgSelection() {
@@ -124,6 +339,7 @@ function insertIntoQuery(snippet) {
   const cursorPosition = before.length + insertion.length;
   textarea.focus();
   textarea.setSelectionRange(cursorPosition, cursorPosition);
+  refreshQueryEditorState();
 }
 
 function addClauseToQuery(clause) {
@@ -173,6 +389,7 @@ function bindQueryForm() {
         throw new Error(data.error || translate("toast.query_failed"));
       }
       renderQueryResult(data);
+      loadQueryHistory(state.queryHistory.filter);
     } catch (error) {
       const message = error instanceof Error ? error.message : translate("toast.query_failed");
       showToast(message, "danger");
@@ -304,6 +521,7 @@ function loadSavedQueryIntoForm(saved) {
   idInput.value = saved.id;
   queryInput.value = saved.soql;
   queryInput.focus();
+  refreshQueryEditorState();
   const submitButton = document.getElementById("saved-query-submit");
   if (submitButton) {
     submitButton.textContent = submitButton.dataset.labelUpdate || submitButton.textContent;
@@ -378,6 +596,116 @@ function initializeSavedQueries() {
   loadSavedQueries();
 }
 
+function renderQueryHistory() {
+  const list = document.getElementById("query-history-list");
+  const empty = document.getElementById("query-history-empty");
+  const filter = document.getElementById("query-history-filter");
+  if (!list || !empty || !filter) return;
+
+  const allLabel = filter.dataset.labelAll || translate("history.filter_all");
+  filter.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = allLabel;
+  filter.appendChild(defaultOption);
+
+  state.queryHistory.objects
+    .slice()
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .forEach((objectName) => {
+      const option = document.createElement("option");
+      option.value = objectName;
+      option.textContent = objectName;
+      filter.appendChild(option);
+    });
+
+  filter.value = state.queryHistory.filter || "";
+
+  list.innerHTML = "";
+  if (!state.queryHistory.entries.length) {
+    showElement(empty, true);
+    return;
+  }
+
+  showElement(empty, false);
+  const unknownLabel = list.dataset.labelUnknown || translate("history.object_unknown");
+  const orgLabel = list.dataset.labelOrg || translate("history.org_label");
+
+  state.queryHistory.entries.forEach((entry) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "list-group-item list-group-item-action text-start";
+
+    const header = document.createElement("div");
+    header.className = "d-flex justify-content-between align-items-center mb-1";
+
+    const badge = document.createElement("span");
+    badge.className = "badge bg-light text-dark";
+    badge.textContent = entry.object_name || unknownLabel;
+    header.appendChild(badge);
+
+    const timeEl = document.createElement("span");
+    timeEl.className = "small text-muted";
+    timeEl.textContent = formatTimestamp(entry.executed_at);
+    header.appendChild(timeEl);
+    item.appendChild(header);
+
+    const orgInfo = document.createElement("div");
+    orgInfo.className = "small text-muted";
+    orgInfo.textContent = `${orgLabel}: ${entry.org_id}`;
+    item.appendChild(orgInfo);
+
+    const queryText = document.createElement("code");
+    queryText.className = "d-block text-break mt-1";
+    queryText.textContent = entry.soql;
+    item.appendChild(queryText);
+
+    item.addEventListener("click", () => {
+      const textarea = document.getElementById("soql-query");
+      if (!textarea) return;
+      textarea.value = entry.soql;
+      textarea.focus();
+      refreshQueryEditorState();
+    });
+
+    list.appendChild(item);
+  });
+}
+
+async function loadQueryHistory(objectName = state.queryHistory.filter) {
+  const params = new URLSearchParams();
+  if (objectName) {
+    params.set("object", objectName);
+  }
+  try {
+    const response = await fetch(`/api/query-history${params.toString() ? `?${params.toString()}` : ""}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || translate("toast.query_history_load_failed"));
+    }
+    state.queryHistory.entries = Array.isArray(data.entries) ? data.entries : [];
+    state.queryHistory.objects = Array.isArray(data.objects) ? data.objects : [];
+    state.queryHistory.filter = data.selected_object || objectName || "";
+    renderQueryHistory();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : translate("toast.query_history_load_failed");
+    showToast(message, "danger");
+  }
+}
+
+function initializeQueryHistory() {
+  const filter = document.getElementById("query-history-filter");
+  if (filter) {
+    filter.addEventListener("change", (event) => {
+      const value = event.target.value;
+      state.queryHistory.filter = value;
+      loadQueryHistory(value);
+    });
+  }
+  renderQueryHistory();
+  loadQueryHistory();
+}
+
 function clearMetadata() {
   state.metadata.objects = [];
   state.metadata.fields = {};
@@ -385,6 +713,7 @@ function clearMetadata() {
   state.metadata.filter = "";
   renderObjectList();
   renderFieldList([]);
+  updateFieldSuggestions();
 }
 
 async function loadMetadataForSelectedOrg() {
@@ -487,12 +816,24 @@ function renderObjectList(filterText = state.metadata.filter) {
     });
 }
 
-function selectObject(objectName) {
+function selectObject(objectName, options = {}) {
   if (!objectName) return;
+  const silent = options?.silent ?? false;
+  if (state.metadata.selectedObject === objectName) {
+    if (!state.metadata.fields[objectName]) {
+      loadFieldsForObject(objectName);
+    } else if (!silent) {
+      updateFieldSuggestions();
+    }
+    return;
+  }
   state.metadata.selectedObject = objectName;
   renderObjectList();
   renderFieldList([]);
   loadFieldsForObject(objectName);
+  if (!silent) {
+    updateFieldSuggestions();
+  }
 }
 
 async function loadFieldsForObject(objectName) {
@@ -576,6 +917,8 @@ function renderFieldList(fields = null) {
       item.addEventListener("click", () => insertIntoQuery(field.name));
       list.appendChild(item);
     });
+
+  updateFieldSuggestions();
 }
 
 function initializeAutocomplete() {
@@ -724,9 +1067,11 @@ function bindOrgForm() {
 document.addEventListener("DOMContentLoaded", () => {
   bindOrgSelection();
   bindQueryForm();
+  bindQueryEditor();
   bindOrgForm();
   bindSnippetButtons();
   initializeSavedQueries();
+  initializeQueryHistory();
   initializeAutocomplete();
   loadMetadataForSelectedOrg();
 });

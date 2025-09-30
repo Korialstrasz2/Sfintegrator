@@ -51,6 +51,18 @@
             <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
             <textarea id="soql-query" class="form-control" rows="5" placeholder="{{ t('index.query.soql_placeholder') }}"></textarea>
           </div>
+          <div
+            id="query-field-suggestions"
+            class="field-suggestions-bar d-none"
+            data-label-title="{{ t('index.query.suggestions.title') }}"
+            data-label-empty="{{ t('index.query.suggestions.empty') }}"
+            data-label-field-exists="{{ t('index.query.suggestions.field_exists_toast') }}"
+          >
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <span class="small text-uppercase fw-semibold text-muted suggestions-title"></span>
+              <div id="query-field-suggestions-list" class="d-flex flex-wrap gap-2"></div>
+            </div>
+          </div>
           <div class="d-flex flex-wrap gap-2 mb-3">
             <button type="button" id="add-limit" class="btn btn-outline-secondary btn-sm">
               {{ t('index.query.helpers.add_limit') }}
@@ -107,6 +119,28 @@
             </div>
           </div>
           <div class="col-lg-6">
+            <div class="border rounded p-3 h-100">
+              <h6 class="mb-3">{{ t('index.query.history.title') }}</h6>
+              <div class="mb-3">
+                <label class="form-label" for="query-history-filter">{{ t('index.query.history.filter_label') }}</label>
+                <select
+                  id="query-history-filter"
+                  class="form-select"
+                  data-label-all="{{ t('index.query.history.filter_all') }}"
+                ></select>
+              </div>
+              <div id="query-history-empty" class="text-muted small">
+                {{ t('index.query.history.empty') }}
+              </div>
+              <div
+                id="query-history-list"
+                class="list-group query-history-list"
+                data-label-unknown="{{ t('index.query.history.object_unknown') }}"
+                data-label-org="{{ t('index.query.history.org_label') }}"
+              ></div>
+            </div>
+          </div>
+          <div class="col-12">
             <div class="border rounded p-3 h-100">
               <h6 class="mb-3">{{ t('index.query.autocomplete.title') }}</h6>
               <div class="mb-3">

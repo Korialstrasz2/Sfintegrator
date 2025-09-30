@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 import threading
 
@@ -22,12 +23,24 @@ from .salesforce import (
 from .i18n import (DEFAULT_LANGUAGE, get_frontend_translations,
                    get_language_codes, get_language_name, get_language_pack,
                    translate)
-from .storage import OrgConfig, saved_queries_storage, storage
+from .storage import (OrgConfig, query_history_storage, saved_queries_storage,
+                      storage)
 
 main_bp = Blueprint("main", __name__)
 
 THEMES = ["classic", "modern", "dark", "sci-fi"]
 DEFAULT_THEME = THEMES[0]
+
+_FROM_PATTERN = re.compile(r"\bFROM\s+([a-zA-Z0-9_.]+)", re.IGNORECASE)
+
+
+def _extract_object_name(soql: str | None) -> str | None:
+    if not soql:
+        return None
+    match = _FROM_PATTERN.search(soql)
+    if not match:
+        return None
+    return match.group(1)
 
 
 @main_bp.app_context_processor
@@ -247,6 +260,15 @@ def api_query() -> Response:
     except SalesforceError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    try:
+        query_history_storage.add(
+            org_id=org_id,
+            soql=soql,
+            object_name=_extract_object_name(soql),
+        )
+    except Exception:  # pragma: no cover - defensive logging
+        current_app.logger.exception("Unable to store query history entry")
+
     return jsonify(result)
 
 
@@ -280,6 +302,28 @@ def api_save_query() -> Response:
 def api_delete_saved_query(query_id: str) -> Response:
     saved_queries_storage.delete(query_id)
     return Response(status=204)
+
+
+@main_bp.route("/api/query-history", methods=["GET"])
+def api_query_history() -> Response:
+    object_name = request.args.get("object") or None
+    entries = [
+        {
+            "id": item.id,
+            "org_id": item.org_id,
+            "soql": item.soql,
+            "object_name": item.object_name,
+            "executed_at": item.executed_at,
+        }
+        for item in query_history_storage.list(object_name)
+    ]
+    objects = query_history_storage.list_objects()
+    payload = {
+        "entries": entries,
+        "objects": objects,
+        "selected_object": object_name,
+    }
+    return jsonify(payload)
 
 
 @main_bp.route("/api/sobjects", methods=["GET"])
