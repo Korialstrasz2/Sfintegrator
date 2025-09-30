@@ -4,7 +4,7 @@ import base64
 import hashlib
 import logging
 from dataclasses import asdict
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -74,24 +74,66 @@ def refresh_access_token(org: OrgConfig) -> OrgConfig:
     return updated
 
 
-def query(org: OrgConfig, soql: str) -> Dict:
+def _ensure_authorized(org: OrgConfig) -> None:
     if not org.access_token or not org.instance_url:
         raise SalesforceError("Org is not authorized. Please connect using OAuth first.")
 
+
+def _authorized_get(
+    org: OrgConfig, path: str, params: Optional[Dict[str, str]] = None
+) -> Tuple[Dict, OrgConfig]:
+    _ensure_authorized(org)
+    url = f"{org.instance_url}{path}"
     headers = {"Authorization": f"Bearer {org.access_token}"}
-    params = {"q": soql}
-    url = f"{org.instance_url}/services/data/v57.0/query"
     response = requests.get(url, headers=headers, params=params, timeout=30)
 
     if response.status_code == 401 and org.refresh_token:
         refreshed = refresh_access_token(org)
+        url = f"{refreshed.instance_url}{path}"
         headers = {"Authorization": f"Bearer {refreshed.access_token}"}
         response = requests.get(url, headers=headers, params=params, timeout=30)
+        org = refreshed
 
     if not response.ok:
-        raise SalesforceError(f"Salesforce query failed: {response.text}")
+        raise SalesforceError(f"Salesforce request failed: {response.text}")
 
-    return response.json()
+    return response.json(), org
+
+
+def query(org: OrgConfig, soql: str) -> Dict:
+    data, _ = _authorized_get(org, "/services/data/v57.0/query", params={"q": soql})
+    return data
+
+
+def list_sobjects(org: OrgConfig) -> List[Dict[str, str]]:
+    data, _ = _authorized_get(org, "/services/data/v57.0/sobjects")
+    sobjects = []
+    for item in data.get("sobjects", []):
+        sobjects.append(
+            {
+                "name": item.get("name", ""),
+                "label": item.get("label", ""),
+                "custom": bool(item.get("custom")),
+            }
+        )
+    return sobjects
+
+
+def describe_sobject(org: OrgConfig, object_name: str) -> List[Dict[str, str]]:
+    path = f"/services/data/v57.0/sobjects/{object_name}" if object_name else ""
+    if not path:
+        raise SalesforceError("Missing object name")
+    data, _ = _authorized_get(org, f"{path}/describe")
+    fields = []
+    for field in data.get("fields", []):
+        fields.append(
+            {
+                "name": field.get("name", ""),
+                "label": field.get("label", ""),
+                "type": field.get("type", ""),
+            }
+        )
+    return fields
 
 
 def serialize_org(org: OrgConfig) -> Dict[str, Optional[str]]:

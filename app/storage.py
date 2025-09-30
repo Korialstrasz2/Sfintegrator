@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "orgs.json"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+ORGS_DATA_FILE = DATA_DIR / "orgs.json"
+SAVED_QUERIES_DATA_FILE = DATA_DIR / "saved_queries.json"
 
 _lock = threading.Lock()
 
@@ -70,10 +73,73 @@ class OrgStorage:
         return list(self.load_all().values())
 
 
+@dataclass
+class SavedQuery:
+    id: str
+    label: str
+    soql: str
+
+
+class SavedQueryStorage:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def load_all(self) -> Dict[str, SavedQuery]:
+        if not self.path.exists():
+            return {}
+        with self.path.open("r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        return {item["id"]: SavedQuery(**item) for item in raw}
+
+    def save_all(self, queries: Dict[str, SavedQuery]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("w", encoding="utf-8") as fh:
+            json.dump([asdict(query) for query in queries.values()], fh, indent=2, sort_keys=True)
+
+    def _generate_id(self, label: str, existing: Dict[str, SavedQuery]) -> str:
+        tokens = re.findall(r"[a-z0-9]+", label.lower())
+        base = "-".join(tokens) or "query"
+        candidate = base
+        index = 1
+        while candidate in existing:
+            candidate = f"{base}-{index}"
+            index += 1
+        return candidate
+
+    def upsert(self, label: str, soql: str, query_id: Optional[str] = None) -> Tuple[SavedQuery, bool]:
+        with _lock:
+            queries = self.load_all()
+            created = False
+            if query_id and query_id in queries:
+                identifier = query_id
+            else:
+                identifier = self._generate_id(label, queries)
+                created = True
+            saved = SavedQuery(id=identifier, label=label, soql=soql)
+            queries[identifier] = saved
+            self.save_all(queries)
+            return saved, created
+
+    def delete(self, query_id: str) -> None:
+        with _lock:
+            queries = self.load_all()
+            if query_id in queries:
+                del queries[query_id]
+                self.save_all(queries)
+
+    def get(self, query_id: str) -> Optional[SavedQuery]:
+        return self.load_all().get(query_id)
+
+    def list(self) -> List[SavedQuery]:
+        return list(self.load_all().values())
+
+
 def ensure_storage() -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not DATA_FILE.exists():
-        DATA_FILE.write_text("[]", encoding="utf-8")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for path in (ORGS_DATA_FILE, SAVED_QUERIES_DATA_FILE):
+        if not path.exists():
+            path.write_text("[]", encoding="utf-8")
 
 
-storage = OrgStorage(DATA_FILE)
+storage = OrgStorage(ORGS_DATA_FILE)
+saved_queries_storage = SavedQueryStorage(SAVED_QUERIES_DATA_FILE)

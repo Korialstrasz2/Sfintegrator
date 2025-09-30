@@ -10,12 +10,19 @@ from flask import (Blueprint, Response, current_app, jsonify, redirect,
 
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from .salesforce import (SalesforceError, build_authorize_url,
-                         exchange_code_for_token, query, serialize_org)
+from .salesforce import (
+    SalesforceError,
+    build_authorize_url,
+    describe_sobject,
+    exchange_code_for_token,
+    list_sobjects,
+    query,
+    serialize_org,
+)
 from .i18n import (DEFAULT_LANGUAGE, get_frontend_translations,
                    get_language_codes, get_language_name, get_language_pack,
                    translate)
-from .storage import OrgConfig, storage
+from .storage import OrgConfig, saved_queries_storage, storage
 
 main_bp = Blueprint("main", __name__)
 
@@ -216,6 +223,74 @@ def api_query() -> Response:
         return jsonify({"error": str(exc)}), 400
 
     return jsonify(result)
+
+
+@main_bp.route("/api/saved-queries", methods=["GET"])
+def api_list_saved_queries() -> Response:
+    queries = [
+        {"id": item.id, "label": item.label, "soql": item.soql}
+        for item in saved_queries_storage.list()
+    ]
+    return jsonify(queries)
+
+
+@main_bp.route("/api/saved-queries", methods=["POST"])
+def api_save_query() -> Response:
+    payload = request.get_json(force=True)
+    label = (payload.get("label") or "").strip()
+    soql = (payload.get("soql") or "").strip()
+    query_id = (payload.get("id") or "").strip() or None
+
+    if not label:
+        return jsonify({"error": "label is required"}), 400
+    if not soql:
+        return jsonify({"error": "soql is required"}), 400
+
+    saved, created = saved_queries_storage.upsert(label, soql, query_id)
+    status = 201 if created else 200
+    return jsonify({"id": saved.id, "label": saved.label, "soql": saved.soql}), status
+
+
+@main_bp.route("/api/saved-queries/<query_id>", methods=["DELETE"])
+def api_delete_saved_query(query_id: str) -> Response:
+    saved_queries_storage.delete(query_id)
+    return Response(status=204)
+
+
+@main_bp.route("/api/sobjects", methods=["GET"])
+def api_list_sobjects_endpoint() -> Response:
+    org_id = request.args.get("org_id")
+    if not org_id:
+        return jsonify({"error": "org_id is required"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    try:
+        objects = list_sobjects(org)
+    except SalesforceError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(objects)
+
+
+@main_bp.route("/api/sobjects/<object_name>/fields", methods=["GET"])
+def api_list_sobject_fields(object_name: str) -> Response:
+    org_id = request.args.get("org_id")
+    if not org_id:
+        return jsonify({"error": "org_id is required"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    try:
+        fields = describe_sobject(org, object_name)
+    except SalesforceError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(fields)
 
 
 @main_bp.errorhandler(SalesforceError)
