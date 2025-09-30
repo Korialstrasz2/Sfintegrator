@@ -26,10 +26,16 @@ from .storage import OrgConfig, saved_queries_storage, storage
 
 main_bp = Blueprint("main", __name__)
 
+THEMES = ["classic", "modern", "dark", "sci-fi"]
+DEFAULT_THEME = THEMES[0]
+
 
 @main_bp.app_context_processor
 def inject_i18n_context() -> dict[str, object]:
     language = session.get("language", DEFAULT_LANGUAGE)
+    theme = session.get("theme", DEFAULT_THEME)
+    if theme not in THEMES:
+        theme = DEFAULT_THEME
 
     def _translate(key: str, **kwargs: str) -> str:
         text = translate(key, language)
@@ -49,10 +55,25 @@ def inject_i18n_context() -> dict[str, object]:
         get_frontend_translations(language), ensure_ascii=False
     )
 
+    themes_translations = (
+        language_pack.get("settings", {}).get("themes", {}) if language_pack else {}
+    )
+    available_themes = [
+        {
+            "id": theme_key,
+            "label": themes_translations.get(
+                theme_key, theme_key.replace("-", " ").title()
+            ),
+        }
+        for theme_key in THEMES
+    ]
+
     return {
         "t": _translate,
         "current_language": language,
+        "current_theme": theme,
         "available_languages": available_languages,
+        "available_themes": available_themes,
         "language_pack": language_pack,
         "frontend_translations_json": frontend_translations,
     }
@@ -100,11 +121,15 @@ def settings() -> str:
         language = request.form.get("language", DEFAULT_LANGUAGE)
         if language not in get_language_codes():
             language = DEFAULT_LANGUAGE
+        theme = request.form.get("theme", DEFAULT_THEME)
+        if theme not in THEMES:
+            theme = DEFAULT_THEME
         session["language"] = language
+        session["theme"] = theme
         return redirect(url_for("main.settings", saved=1))
 
     saved = request.args.get("saved") == "1"
-    return render_template("settings.html", language_saved=saved)
+    return render_template("settings.html", settings_saved=saved)
 
 
 @main_bp.route("/api/orgs", methods=["GET"])

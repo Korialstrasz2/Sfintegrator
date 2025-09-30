@@ -162,8 +162,15 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
         "settings": {
             "title": "Settings",
             "language_label": "Language",
-            "language_submit": "Save settings",
-            "language_saved": "Language updated successfully.",
+            "theme_label": "Theme",
+            "save_button": "Save settings",
+            "saved": "Settings updated successfully.",
+            "themes": {
+                "classic": "Classic",
+                "modern": "Modern",
+                "dark": "Dark",
+                "sci-fi": "Sci-fi",
+            },
         },
         "frontend": {
             "toast": {
@@ -349,8 +356,15 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
         "settings": {
             "title": "Impostazioni",
             "language_label": "Lingua",
-            "language_submit": "Salva impostazioni",
-            "language_saved": "Lingua aggiornata correttamente.",
+            "theme_label": "Tema",
+            "save_button": "Salva impostazioni",
+            "saved": "Impostazioni aggiornate correttamente.",
+            "themes": {
+                "classic": "Classico",
+                "modern": "Moderno",
+                "dark": "Scuro",
+                "sci-fi": "Fantascienza",
+            },
         },
         "frontend": {
             "toast": {
