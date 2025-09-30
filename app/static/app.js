@@ -20,8 +20,238 @@ const state = {
   },
 };
 
+const STORAGE_PREFIX = "sfint";
+const STORAGE_KEYS = {
+  settings: `${STORAGE_PREFIX}.settings`,
+  savedQueries: `${STORAGE_PREFIX}.savedQueries`,
+  selectedOrg: `${STORAGE_PREFIX}.selectedOrg`,
+  queryDraft: `${STORAGE_PREFIX}.queryDraft`,
+};
+
+function getLocalStorage() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return null;
+    }
+    return window.localStorage;
+  } catch (error) {
+    console.warn("LocalStorage is not available:", error);
+    return null;
+  }
+}
+
+function loadJSONFromStorage(key, fallback = null) {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return fallback;
+  }
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) {
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed === undefined ? fallback : parsed;
+  } catch (error) {
+    console.warn(`Unable to read localStorage key "${key}":`, error);
+    return fallback;
+  }
+}
+
+function saveJSONToStorage(key, value) {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Unable to persist localStorage key "${key}":`, error);
+  }
+}
+
+function removeFromStorage(key) {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.removeItem(key);
+  } catch (error) {
+    console.warn(`Unable to remove localStorage key "${key}":`, error);
+  }
+}
+
+function loadSettingsFromStorage() {
+  const settings = loadJSONFromStorage(STORAGE_KEYS.settings, null);
+  if (!settings || typeof settings !== "object") {
+    return null;
+  }
+  const result = {};
+  if (typeof settings.theme === "string" && settings.theme.trim()) {
+    result.theme = settings.theme.trim();
+  }
+  if (typeof settings.language === "string" && settings.language.trim()) {
+    result.language = settings.language.trim();
+  }
+  return Object.keys(result).length ? result : null;
+}
+
+function saveSettingsToStorage(settings) {
+  if (!settings || typeof settings !== "object") {
+    return;
+  }
+  const payload = {};
+  if (typeof settings.theme === "string" && settings.theme.trim()) {
+    payload.theme = settings.theme.trim();
+  }
+  if (typeof settings.language === "string" && settings.language.trim()) {
+    payload.language = settings.language.trim();
+  }
+  if (Object.keys(payload).length) {
+    saveJSONToStorage(STORAGE_KEYS.settings, payload);
+  } else {
+    removeFromStorage(STORAGE_KEYS.settings);
+  }
+}
+
+function loadSavedQueriesFromStorage() {
+  const stored = loadJSONFromStorage(STORAGE_KEYS.savedQueries, []);
+  if (!Array.isArray(stored)) {
+    return [];
+  }
+  return stored
+    .map((item) => ({
+      id: typeof item?.id === "string" ? item.id.trim() : null,
+      label: typeof item?.label === "string" ? item.label.trim() : "",
+      soql: typeof item?.soql === "string" ? item.soql : "",
+    }))
+    .filter((item) => item.id && item.label && item.soql);
+}
+
+function saveSavedQueriesToStorage(queries) {
+  if (!Array.isArray(queries)) {
+    return;
+  }
+  const sanitized = queries
+    .map((item) => ({
+      id: typeof item?.id === "string" ? item.id.trim() : null,
+      label: typeof item?.label === "string" ? item.label.trim() : "",
+      soql: typeof item?.soql === "string" ? item.soql : "",
+    }))
+    .filter((item) => item.id && item.label && item.soql);
+  saveJSONToStorage(STORAGE_KEYS.savedQueries, sanitized);
+}
+
+function loadSelectedOrgFromStorage() {
+  const stored = loadJSONFromStorage(STORAGE_KEYS.selectedOrg, null);
+  if (!stored || typeof stored !== "object" || typeof stored.id !== "string") {
+    return null;
+  }
+  return {
+    id: stored.id,
+    label: typeof stored.label === "string" ? stored.label : "",
+  };
+}
+
+function saveSelectedOrgToStorage(orgId, label = "") {
+  if (!orgId) {
+    clearSelectedOrgFromStorage();
+    return;
+  }
+  saveJSONToStorage(STORAGE_KEYS.selectedOrg, {
+    id: orgId,
+    label: label || "",
+  });
+}
+
+function clearSelectedOrgFromStorage() {
+  removeFromStorage(STORAGE_KEYS.selectedOrg);
+}
+
+function loadQueryDraftFromStorage() {
+  const draft = loadJSONFromStorage(STORAGE_KEYS.queryDraft, null);
+  return typeof draft === "string" ? draft : null;
+}
+
+function saveQueryDraftToStorage(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    removeFromStorage(STORAGE_KEYS.queryDraft);
+    return;
+  }
+  saveJSONToStorage(STORAGE_KEYS.queryDraft, value);
+}
+
+function clearQueryDraftFromStorage() {
+  removeFromStorage(STORAGE_KEYS.queryDraft);
+}
+
+function applyLanguage(language) {
+  if (!language || typeof language !== "string") {
+    return;
+  }
+  document.documentElement?.setAttribute("lang", language);
+  window.APP_LANGUAGE = language;
+}
+
+function applyTheme(theme) {
+  if (!theme || typeof theme !== "string") {
+    return;
+  }
+  const apply = () => {
+    const body = document.body;
+    if (!body) {
+      return;
+    }
+    const themeClassPrefix = "theme-";
+    body.classList.forEach((className) => {
+      if (className.startsWith(themeClassPrefix) && className !== `${themeClassPrefix}${theme}`) {
+        body.classList.remove(className);
+      }
+    });
+    body.classList.add(`${themeClassPrefix}${theme}`);
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", apply, { once: true });
+  } else {
+    apply();
+  }
+}
+
+function applyStoredSettings() {
+  const storedSettings = loadSettingsFromStorage();
+  if (!storedSettings) {
+    return;
+  }
+  if (storedSettings.language) {
+    applyLanguage(storedSettings.language);
+  }
+  if (storedSettings.theme) {
+    applyTheme(storedSettings.theme);
+  }
+}
+
+applyStoredSettings();
+
 const FROM_REGEX = /\bFROM\s+([a-zA-Z0-9_.]+)/i;
 const SELECT_REGEX = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/i;
+
+function escapeSelector(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  if (window.CSS?.escape) {
+    return window.CSS.escape(value);
+  }
+  return value.replace(/([#.;?+*~':"!^$\[\]()=>|/@\\])/g, "\\$1");
+}
+
+function selectHasOption(selectElement, value) {
+  if (!selectElement || typeof value !== "string") {
+    return false;
+  }
+  return Array.from(selectElement.options || []).some((option) => option.value === value);
+}
 
 const DEFAULT_QUERY = "SELECT Id\nFROM Account";
 const KEYWORD_PATTERNS = [
@@ -548,13 +778,18 @@ function downloadFile(content, filename, mimeType) {
 function bindQueryEditor() {
   const textarea = document.getElementById("soql-query");
   if (!textarea) return;
-  if (!textarea.value.trim()) {
+  const storedDraft = loadQueryDraftFromStorage();
+  if (storedDraft && storedDraft.trim()) {
+    textarea.value = storedDraft;
+  } else if (!textarea.value.trim()) {
     textarea.value = DEFAULT_QUERY;
   }
   applyKeywordFormatting(textarea, { preserveCursor: false });
+  saveQueryDraftToStorage(textarea.value);
   textarea.addEventListener("input", () => {
     applyKeywordFormatting(textarea);
     refreshQueryEditorState();
+    saveQueryDraftToStorage(textarea.value);
   });
   textarea.addEventListener("click", () => updateFieldSuggestions());
   textarea.addEventListener("focus", () => updateFieldSuggestions());
@@ -763,20 +998,66 @@ function updateFieldSuggestions() {
   showElement(container, true);
 }
 
+function handleOrgSelection(orgId, label = "") {
+  const normalizedId = typeof orgId === "string" ? orgId.trim() : "";
+  const normalizedLabel = typeof label === "string" ? label.trim() : "";
+
+  if (!normalizedId) {
+    state.selectedOrg = null;
+    clearSelectedOrgFromStorage();
+    const selectedOrgInput = document.getElementById("selected-org");
+    if (selectedOrgInput) {
+      selectedOrgInput.value = "";
+    }
+    document.querySelectorAll(".org-select").forEach((btn) => btn.classList.remove("active"));
+    return;
+  }
+
+  state.selectedOrg = normalizedId;
+  const selectedOrgInput = document.getElementById("selected-org");
+  const button = document.querySelector(
+    `.org-select[data-org="${escapeSelector(normalizedId)}"]`
+  );
+  const resolvedLabel =
+    normalizedLabel ||
+    button?.querySelector("strong")?.textContent.trim() ||
+    button?.textContent.trim() ||
+    normalizedLabel;
+  if (selectedOrgInput) {
+    selectedOrgInput.value = resolvedLabel;
+  }
+  document
+    .querySelectorAll(".org-select")
+    .forEach((btn) => btn.classList.toggle("active", btn.dataset.org === normalizedId));
+  saveSelectedOrgToStorage(normalizedId, resolvedLabel);
+  loadMetadataForSelectedOrg();
+}
+
 function bindOrgSelection() {
   document.querySelectorAll(".org-select").forEach((button) => {
     button.addEventListener("click", () => {
-      state.selectedOrg = button.dataset.org;
       const label = button.querySelector("strong")?.textContent.trim() ?? button.textContent.trim();
-      const selectedOrgInput = document.getElementById("selected-org");
-      if (selectedOrgInput) {
-        selectedOrgInput.value = label;
-      }
-      document.querySelectorAll(".org-select").forEach((btn) => btn.classList.remove("active"));
-      button.classList.add("active");
-      loadMetadataForSelectedOrg();
+      handleOrgSelection(button.dataset.org, label);
     });
   });
+}
+
+function restoreSelectedOrgSelection() {
+  const orgButtons = document.querySelectorAll(".org-select");
+  if (!orgButtons.length) {
+    return;
+  }
+  const stored = loadSelectedOrgFromStorage();
+  if (!stored?.id) {
+    return;
+  }
+  const button = document.querySelector(`.org-select[data-org="${escapeSelector(stored.id)}"]`);
+  if (!button) {
+    clearSelectedOrgFromStorage();
+    return;
+  }
+  const label = stored.label || button.querySelector("strong")?.textContent.trim() || button.textContent.trim();
+  handleOrgSelection(stored.id, label);
 }
 
 function renderQueryResult(data) {
@@ -980,7 +1261,8 @@ function bindQueryForm() {
   if (!form) return;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const query = document.getElementById("soql-query").value.trim();
+    const queryInput = document.getElementById("soql-query");
+    const query = queryInput?.value.trim() ?? "";
     if (!state.selectedOrg) {
       showToast(translate("toast.select_org"), "warning");
       return;
@@ -1001,6 +1283,8 @@ function bindQueryForm() {
         }
       }
     }
+
+    saveQueryDraftToStorage(queryInput?.value ?? query);
 
     try {
       const response = await fetch("/api/query", {
@@ -1031,6 +1315,7 @@ async function loadSavedQueries() {
     }
     state.savedQueries = Array.isArray(data) ? data : [];
     renderSavedQueries();
+    saveSavedQueriesToStorage(state.savedQueries);
   } catch (error) {
     const message = error instanceof Error ? error.message : translate("toast.saved_queries_load_failed");
     showToast(message, "danger");
@@ -1100,6 +1385,7 @@ function renderSavedQueries() {
             throw new Error(translate("toast.saved_query_delete_failed"));
           }
           state.savedQueries = state.savedQueries.filter((itemSaved) => itemSaved.id !== saved.id);
+          saveSavedQueriesToStorage(state.savedQueries);
           if (state.activeSavedQueryId === saved.id) {
             resetSavedQueryForm();
           } else {
@@ -1146,6 +1432,7 @@ function loadSavedQueryIntoForm(saved) {
   idInput.value = saved.id;
   queryInput.value = saved.soql;
   applyKeywordFormatting(queryInput, { preserveCursor: false });
+  saveQueryDraftToStorage(queryInput.value);
   queryInput.focus();
   refreshQueryEditorState();
   const submitButton = document.getElementById("saved-query-submit");
@@ -1196,6 +1483,7 @@ function bindSavedQueryForm() {
       } else {
         state.savedQueries.push(data);
       }
+      saveSavedQueriesToStorage(state.savedQueries);
       state.activeSavedQueryId = data.id;
       idInput.value = data.id;
       const submitButton = document.getElementById("saved-query-submit");
@@ -1219,7 +1507,64 @@ function bindSavedQueryForm() {
 function initializeSavedQueries() {
   resetSavedQueryForm();
   bindSavedQueryForm();
+  const storedQueries = loadSavedQueriesFromStorage();
+  if (Array.isArray(storedQueries)) {
+    state.savedQueries = storedQueries;
+    renderSavedQueries();
+  }
   loadSavedQueries();
+}
+
+function initializeAppSettings() {
+  const form = document.getElementById("app-settings-form");
+  if (!form) {
+    return;
+  }
+
+  const languageSelect = form.querySelector("#language");
+  const themeSelect = form.querySelector("#theme");
+  const storedSettings = loadSettingsFromStorage();
+
+  if (storedSettings?.language && languageSelect && selectHasOption(languageSelect, storedSettings.language)) {
+    languageSelect.value = storedSettings.language;
+    applyLanguage(storedSettings.language);
+  }
+
+  if (storedSettings?.theme && themeSelect && selectHasOption(themeSelect, storedSettings.theme)) {
+    themeSelect.value = storedSettings.theme;
+    applyTheme(storedSettings.theme);
+  }
+
+  form.addEventListener("submit", () => {
+    saveSettingsToStorage({
+      language: languageSelect?.value ?? null,
+      theme: themeSelect?.value ?? null,
+    });
+  });
+
+  if (languageSelect) {
+    languageSelect.addEventListener("change", () => {
+      const settings = loadSettingsFromStorage() || {};
+      settings.language = languageSelect.value;
+      if (themeSelect?.value && !settings.theme) {
+        settings.theme = themeSelect.value;
+      }
+      saveSettingsToStorage(settings);
+      applyLanguage(languageSelect.value);
+    });
+  }
+
+  if (themeSelect) {
+    themeSelect.addEventListener("change", () => {
+      const settings = loadSettingsFromStorage() || {};
+      settings.theme = themeSelect.value;
+      if (languageSelect?.value && !settings.language) {
+        settings.language = languageSelect.value;
+      }
+      saveSettingsToStorage(settings);
+      applyTheme(themeSelect.value);
+    });
+  }
 }
 
 function renderQueryHistory() {
@@ -1692,7 +2037,9 @@ function bindOrgForm() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initializeAppSettings();
   bindOrgSelection();
+  restoreSelectedOrgSelection();
   bindQueryForm();
   bindQueryEditor();
   bindOrgForm();
@@ -1700,5 +2047,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeSavedQueries();
   initializeQueryHistory();
   initializeAutocomplete();
-  loadMetadataForSelectedOrg();
+  if (!state.selectedOrg) {
+    loadMetadataForSelectedOrg();
+  }
 });
