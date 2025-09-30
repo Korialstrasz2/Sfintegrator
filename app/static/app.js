@@ -182,16 +182,56 @@ function getFieldSuggestionRank(field, prefix = "") {
   return 2;
 }
 
-function getSelectContext(query = "", cursor = 0) {
+function extractFieldPrefix(segment = "", options = {}) {
+  const {
+    splitOnComma = true,
+    removeAlias = false,
+    preferLastToken = true,
+    separators = null,
+  } = options;
+
+  if (!segment) {
+    return "";
+  }
+
+  let working = segment.replace(/\r?\n/g, " ");
+  if (splitOnComma) {
+    const parts = working.split(",");
+    working = parts.pop() ?? "";
+  }
+
+  if (removeAlias) {
+    const asIndex = working.toUpperCase().indexOf(" AS ");
+    if (asIndex !== -1) {
+      working = working.slice(0, asIndex);
+    }
+  }
+
+  working = working.trim();
+  if (!working) {
+    return "";
+  }
+
+  const splitRegex = separators || /\s+/;
+  const tokens = working.split(splitRegex).filter(Boolean);
+  if (!tokens.length) {
+    return "";
+  }
+
+  return preferLastToken ? tokens[tokens.length - 1] : tokens[0];
+}
+
+function getQueryContext(query = "", cursor = 0) {
   if (!query) {
-    return { inSelect: false, prefix: "" };
+    return { section: null, prefix: "" };
   }
 
   const normalizedCursor = Math.max(0, Math.min(Number(cursor) || 0, query.length));
-  const regex = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/gi;
+
+  const selectRegex = /(\bSELECT\s+)([\s\S]*?)(\s+FROM\b)/gi;
   let match;
 
-  while ((match = regex.exec(query)) !== null) {
+  while ((match = selectRegex.exec(query)) !== null) {
     const selectStart = match.index;
     const fieldsStart = selectStart + match[1].length;
     const fieldsEnd = fieldsStart + match[2].length;
@@ -202,27 +242,69 @@ function getSelectContext(query = "", cursor = 0) {
 
     if (normalizedCursor >= fieldsStart && normalizedCursor <= fieldsEnd) {
       const beforeCursor = query.slice(fieldsStart, normalizedCursor);
-      const segment = beforeCursor.split(",").pop() ?? "";
-      const cleaned = segment.replace(/\r?\n/g, " ").trim();
-      let prefix = cleaned;
-
-      const asIndex = prefix.toUpperCase().indexOf(" AS ");
-      if (asIndex !== -1) {
-        prefix = prefix.slice(0, asIndex).trim();
-      }
-
-      if (prefix.includes(" ")) {
-        prefix = prefix.split(/\s+/)[0] ?? "";
-      }
+      const prefix = /[\s,]$/.test(beforeCursor.slice(-1))
+        ? ""
+        : extractFieldPrefix(beforeCursor, {
+            removeAlias: true,
+            preferLastToken: false,
+            separators: /[\s(]+/,
+          });
 
       return {
-        inSelect: true,
+        section: "select",
         prefix,
       };
     }
   }
 
-  return { inSelect: false, prefix: "" };
+  const whereRegex = /(\bWHERE\s+)([\s\S]*?)(?=\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|\bFOR\s+UPDATE\b|\bRETURNING\b|\bWITH\b|$)/gi;
+
+  while ((match = whereRegex.exec(query)) !== null) {
+    const whereStart = match.index;
+    const clauseStart = whereStart + match[1].length;
+    const clauseEnd = clauseStart + match[2].length;
+
+    if (normalizedCursor < clauseStart) {
+      break;
+    }
+
+    if (normalizedCursor >= clauseStart && normalizedCursor <= clauseEnd) {
+      const beforeCursor = query.slice(clauseStart, normalizedCursor);
+      let prefix = /[\s,]$/.test(beforeCursor.slice(-1))
+        ? ""
+        : extractFieldPrefix(beforeCursor, {
+            splitOnComma: false,
+            separators: /[\s(),=<>!+\-*/]+/,
+          });
+
+      const keywordPrefixes = new Set([
+        "AND",
+        "OR",
+        "LIKE",
+        "IN",
+        "NOT",
+        "NULL",
+        "WITH",
+        "GROUP",
+        "ORDER",
+        "BY",
+        "HAVING",
+        "LIMIT",
+        "OFFSET",
+        "EXISTS",
+      ]);
+      if (prefix && keywordPrefixes.has(prefix.toUpperCase())) {
+        prefix = "";
+      }
+
+      return {
+        section: "where",
+        prefix,
+      };
+    }
+  }
+
+  return { section: null, prefix: "" };
 }
 
 function formatTimestamp(isoString) {
@@ -562,6 +644,17 @@ function addFieldToSelectClause(fieldName) {
   refreshQueryEditorState();
 }
 
+function handleFieldSuggestionClick(fieldName, section) {
+  if (!fieldName) {
+    return;
+  }
+  if (section === "where") {
+    insertIntoQuery(fieldName);
+    return;
+  }
+  addFieldToSelectClause(fieldName);
+}
+
 function updateFieldSuggestions() {
   const container = document.getElementById("query-field-suggestions");
   const list = document.getElementById("query-field-suggestions-list");
@@ -572,7 +665,20 @@ function updateFieldSuggestions() {
   const query = textarea.value || "";
   const objectName = extractObjectNameFromQuery(query);
   const cursor = textarea.selectionStart ?? query.length;
-  const context = getSelectContext(query, cursor);
+  const context = getQueryContext(query, cursor);
+
+  const updateTitle = (currentContext) => {
+    if (!titleElement) return;
+    const baseTitle = container.dataset.labelTitle || "";
+    const parts = [];
+    if (objectName) {
+      parts.push(objectName);
+    }
+    if (currentContext?.section) {
+      parts.push(currentContext.section.toUpperCase());
+    }
+    titleElement.textContent = parts.length ? `${baseTitle} (${parts.join(" • ")})` : baseTitle;
+  };
 
   const hideSuggestions = (label) => {
     list.innerHTML = "";
@@ -583,13 +689,7 @@ function updateFieldSuggestions() {
     }
   };
 
-  const updateTitle = () => {
-    if (!titleElement) return;
-    const baseTitle = container.dataset.labelTitle || "";
-    titleElement.textContent = objectName ? `${baseTitle} (${objectName})` : baseTitle;
-  };
-
-  const showEmptyState = (label) => {
+  const showEmptyState = (label, currentContext) => {
     list.innerHTML = "";
     if (label) {
       const emptyMessage = document.createElement("span");
@@ -597,11 +697,11 @@ function updateFieldSuggestions() {
       emptyMessage.textContent = label;
       list.appendChild(emptyMessage);
     }
-    updateTitle();
+    updateTitle(currentContext);
     showElement(container, true);
   };
 
-  if (!state.selectedOrg || !objectName || !context.inSelect) {
+  if (!state.selectedOrg || !objectName || !context.section) {
     hideSuggestions(container.dataset.labelTitle || "");
     return;
   }
@@ -612,9 +712,13 @@ function updateFieldSuggestions() {
     return;
   }
 
-  const selectedFields = getNormalizedSelectFieldSet(query);
-  const normalizedPrefix = context.prefix.trim().toLowerCase();
-  let available = fields.filter((field) => !selectedFields.has(field.name.toLowerCase()));
+  const normalizedPrefix = (context.prefix || "").trim().toLowerCase();
+  let available = fields.slice();
+
+  if (context.section === "select") {
+    const selectedFields = getNormalizedSelectFieldSet(query);
+    available = available.filter((field) => !selectedFields.has(field.name.toLowerCase()));
+  }
 
   if (normalizedPrefix) {
     available = available.filter((field) => {
@@ -625,7 +729,7 @@ function updateFieldSuggestions() {
   }
 
   if (!available.length) {
-    showEmptyState(container.dataset.labelEmpty || container.dataset.labelTitle || "");
+    showEmptyState(container.dataset.labelEmpty || container.dataset.labelTitle || "", context);
     return;
   }
 
@@ -650,11 +754,11 @@ function updateFieldSuggestions() {
     if (field.label && field.label !== field.name) {
       button.title = field.label;
     }
-    button.addEventListener("click", () => addFieldToSelectClause(field.name));
+    button.addEventListener("click", () => handleFieldSuggestionClick(field.name, context.section));
     list.appendChild(button);
   });
 
-  updateTitle();
+  updateTitle(context);
 
   showElement(container, true);
 }
