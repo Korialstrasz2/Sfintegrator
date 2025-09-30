@@ -169,3 +169,10 @@ body.theme-sci-fi {
   background-color: rgba(59, 130, 246, 0.12);
   border-color: rgba(59, 130, 246, 0.35);
 }
+
+@media (min-width: 1200px) {
+  .sticky-sidebar {
+    position: sticky;
+    top: 1rem;
+  }
+}
