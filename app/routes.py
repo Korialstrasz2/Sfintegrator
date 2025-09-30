@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import threading
 
 from flask import (Blueprint, Response, current_app, jsonify, redirect,
                    render_template, request, url_for)
@@ -17,6 +18,20 @@ main_bp = Blueprint("main", __name__)
 def _state_serializer() -> URLSafeSerializer:
     secret_key = current_app.config.get("SECRET_KEY")
     return URLSafeSerializer(secret_key, salt="oauth-state")
+
+
+_code_verifiers = {}
+_code_verifier_lock = threading.Lock()
+
+
+def _store_code_verifier(nonce: str, code_verifier: str) -> None:
+    with _code_verifier_lock:
+        _code_verifiers[nonce] = code_verifier
+
+
+def _pop_code_verifier(nonce: str) -> str | None:
+    with _code_verifier_lock:
+        return _code_verifiers.pop(nonce, None)
 
 
 @main_bp.route("/")
@@ -94,9 +109,12 @@ def start_auth(org_id: str):
     org = storage.get(org_id)
     if not org:
         return jsonify({"error": "Unknown org"}), 404
-    state_payload = {"org_id": org_id, "nonce": secrets.token_urlsafe(24)}
+    nonce = secrets.token_urlsafe(24)
+    code_verifier = secrets.token_urlsafe(64)
+    _store_code_verifier(nonce, code_verifier)
+    state_payload = {"org_id": org_id, "nonce": nonce}
     state_token = _state_serializer().dumps(state_payload)
-    return redirect(build_authorize_url(org, state_token))
+    return redirect(build_authorize_url(org, state_token, code_verifier))
 
 
 @main_bp.route("/oauth/callback")
@@ -118,6 +136,7 @@ def oauth_callback():
         return jsonify({"error": "Invalid or expired state"}), 400
 
     org_id = state_data.get("org_id")
+    nonce = state_data.get("nonce")
     if not org_id:
         return jsonify({"error": "Invalid state payload"}), 400
 
@@ -125,7 +144,8 @@ def oauth_callback():
     if not org:
         return jsonify({"error": "Unknown org"}), 404
 
-    updated = exchange_code_for_token(org, code)
+    code_verifier = _pop_code_verifier(nonce) if nonce else None
+    updated = exchange_code_for_token(org, code, code_verifier)
     return redirect(url_for("main.index", message=f"Connected {updated.label}"))
 
 

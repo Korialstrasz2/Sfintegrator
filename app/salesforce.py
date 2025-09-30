@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 from dataclasses import asdict
 from typing import Dict, Optional
@@ -15,7 +17,12 @@ class SalesforceError(RuntimeError):
     pass
 
 
-def build_authorize_url(org: OrgConfig, state: str) -> str:
+def _encode_code_challenge(code_verifier: str) -> str:
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def build_authorize_url(org: OrgConfig, state: str, code_verifier: Optional[str] = None) -> str:
     params = {
         "response_type": "code",
         "client_id": org.client_id,
@@ -23,11 +30,14 @@ def build_authorize_url(org: OrgConfig, state: str) -> str:
         "scope": org.auth_scope,
         "state": state,
     }
+    if code_verifier:
+        params["code_challenge"] = _encode_code_challenge(code_verifier)
+        params["code_challenge_method"] = "S256"
     query = "&".join(f"{key}={requests.utils.quote(value)}" for key, value in params.items())
     return f"{org.login_url}/services/oauth2/authorize?{query}"
 
 
-def exchange_code_for_token(org: OrgConfig, code: str) -> OrgConfig:
+def exchange_code_for_token(org: OrgConfig, code: str, code_verifier: Optional[str] = None) -> OrgConfig:
     payload = {
         "grant_type": "authorization_code",
         "code": code,
@@ -35,6 +45,8 @@ def exchange_code_for_token(org: OrgConfig, code: str) -> OrgConfig:
         "client_secret": org.client_secret,
         "redirect_uri": org.redirect_uri,
     }
+    if code_verifier:
+        payload["code_verifier"] = code_verifier
     response = requests.post(f"{org.login_url}/services/oauth2/token", data=payload, timeout=30)
     if not response.ok:
         raise SalesforceError(f"Failed to exchange code: {response.text}")
