@@ -10,7 +10,7 @@
       <li>Sign in to the Salesforce org that you want to integrate.</li>
       <li>Navigate to <strong>Setup &gt; Apps &gt; App Manager</strong> and click <em>New Connected App</em>.</li>
       <li>Give the app a meaningful name, supply an email, and enable <strong>OAuth Settings for API Integration</strong>.</li>
-      <li>Set the <strong>Callback URL</strong> to <code>https://your-host/oauth/callback</code> (update it to match your deployment URL).</li>
+      <li>Set the <strong>Callback URL</strong> to <code>http://localhost:5000/oauth/callback</code> for local development; when deploying, replace <code>localhost:5000</code> with your host name while keeping the path <code>/oauth/callback</code>.</li>
       <li>Select the following OAuth scopes: <code>Full access (full)</code> and <code>Perform requests on your behalf at any time (refresh_token, offline_access)</code>.</li>
       <li>Save the connected app and copy the <strong>Consumer Key</strong> and <strong>Consumer Secret</strong>.</li>
       <li>Under <strong>Manage &gt; OAuth Policies</strong>, ensure that the refresh token policy allows refresh token usage.</li>
@@ -42,7 +42,7 @@
     </ol>
 
     <div class="alert alert-info mt-4">
-      <strong>Tip:</strong> For local development, set your callback URL to <code>http://localhost:5000/oauth/callback</code> and add it to the connected app's list of allowed callbacks.
+      <strong>Tip:</strong> For local development, set your callback URL to <code>http://localhost:5000/oauth/callback</code> and add it to the connected app's list of allowed callbacks. When deploying, update the host name to match your environment but keep the path <code>/oauth/callback</code> so the redirect completes successfully.
     </div>
   </div>
 </div>
