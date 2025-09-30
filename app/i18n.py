@@ -37,11 +37,11 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "selected_org_label": "Selected Org",
                 "selected_org_placeholder": "Select an org",
                 "soql_label": "SOQL Query",
-                "soql_placeholder": "SELECT Id, Name FROM Account",
+                "soql_placeholder": "SELECT Id\nFROM Account",
                 "run_button": "Run query",
                 "helpers": {
                     "add_limit": "Add LIMIT 100",
-                    "add_order_by": "Add ORDER BY Created DESC",
+                    "add_order_by": "Add ORDER BY CreatedDate DESC",
                 },
                 "saved_queries": {
                     "title": "Saved Queries",
@@ -266,11 +266,11 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "selected_org_label": "Organizzazione selezionata",
                 "selected_org_placeholder": "Seleziona un'organizzazione",
                 "soql_label": "Query SOQL",
-                "soql_placeholder": "SELECT Id, Name FROM Account",
+                "soql_placeholder": "SELECT Id\nFROM Account",
                 "run_button": "Esegui query",
                 "helpers": {
                     "add_limit": "Aggiungi LIMIT 100",
-                    "add_order_by": "Aggiungi ORDER BY Created DESC",
+                    "add_order_by": "Aggiungi ORDER BY CreatedDate DESC",
                 },
                 "saved_queries": {
                     "title": "Query salvate",
