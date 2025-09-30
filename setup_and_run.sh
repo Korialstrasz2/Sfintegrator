@@ -8,6 +8,17 @@ cd "$SCRIPT_DIR"
 
 VENV_DIR="$SCRIPT_DIR/venv"
 
+# Attempt to update the repository before doing anything else so that the
+# application is always run with the latest code.
+if command -v git >/dev/null 2>&1; then
+    echo "Updating repository..."
+    if ! git pull --ff-only; then
+        echo "Warning: Failed to update repository. Continuing with existing files." >&2
+    fi
+else
+    echo "Git is not installed or not on PATH; skipping repository update." >&2
+fi
+
 # Prefer python3 when available, otherwise fall back to python.
 if command -v python3 >/dev/null 2>&1; then
     PYTHON="python3"

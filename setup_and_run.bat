@@ -5,6 +5,18 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
+:: Update the repository before continuing so the app runs the latest code
+where git >nul 2>nul
+if %errorlevel%==0 (
+    echo Updating repository...
+    git pull --ff-only
+    if errorlevel 1 (
+        echo Warning: Failed to update repository. Continuing with existing files.
+    )
+) else (
+    echo Git is not available on PATH; skipping repository update.
+)
+
 :: Create a Python virtual environment if it doesn't exist yet
 if not exist "%SCRIPT_DIR%venv" (
     echo Creating Python virtual environment...
