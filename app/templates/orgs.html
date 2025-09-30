@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h5 class="card-title">Add or update an org</h5>
+        <form id="org-form">
+          <div class="mb-3">
+            <label class="form-label" for="org-id">Org ID</label>
+            <input class="form-control" id="org-id" required placeholder="unique-id" />
+            <div class="form-text">Use a unique identifier (e.g. prod, sandbox1).</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-label">Display name</label>
+            <input class="form-control" id="org-label" required placeholder="Production Org" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-environment">Environment</label>
+            <select class="form-select" id="org-environment" required>
+              <option value="production">Production (login.salesforce.com)</option>
+              <option value="sandbox">Sandbox (test.salesforce.com)</option>
+              <option value="custom">Custom Domain</option>
+            </select>
+            <input class="form-control mt-2 d-none" id="org-custom-environment" placeholder="https://your-domain.my.salesforce.com" />
+            <div class="form-text">Select custom to use a My Domain login URL.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-client-id">Consumer Key (Client ID)</label>
+            <input class="form-control" id="org-client-id" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-client-secret">Consumer Secret</label>
+            <input class="form-control" id="org-client-secret" />
+            <div class="form-text">Leave blank to keep the existing secret when editing.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-redirect-uri">Redirect URI</label>
+            <input class="form-control" id="org-redirect-uri" placeholder="https://yourapp.com/oauth/callback" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="org-scope">OAuth Scope</label>
+            <input class="form-control" id="org-scope" value="full refresh_token" />
+          </div>
+          <button class="btn btn-primary" id="org-form-submit" type="submit">Save org</button>
+          <button class="btn btn-link" id="org-form-reset" type="button">Clear form</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Configured orgs</h5>
+        <div id="org-table-container">
+          {% if orgs %}
+            <div class="table-responsive">
+              <table class="table table-striped align-middle">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Label</th>
+                    <th>Environment</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for org in orgs %}
+                    <tr
+                      data-org="{{ org.id }}"
+                      data-environment="{{ org.environment }}"
+                      data-client-id="{{ org.client_id }}"
+                      data-redirect-uri="{{ org.redirect_uri }}"
+                      data-scope="{{ org.auth_scope }}"
+                    >
+                      <td>{{ org.id }}</td>
+                      <td>{{ org.label }}</td>
+                      <td>{{ org.environment }}</td>
+                      <td>
+                        {% if org.access_token %}
+                          <span class="badge bg-success">Connected</span>
+                        {% else %}
+                          <span class="badge bg-secondary">Not connected</span>
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        <div class="btn-group btn-group-sm">
+                          <a class="btn btn-outline-primary" href="{{ url_for('main.start_auth', org_id=org.id) }}">Connect</a>
+                          <button class="btn btn-outline-secondary org-edit">Edit</button>
+                          <button class="btn btn-outline-danger org-delete">Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-muted">No orgs configured yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

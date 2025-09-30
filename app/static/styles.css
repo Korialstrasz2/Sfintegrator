@@ -1,0 +1,12 @@
+body {
+  min-height: 100vh;
+}
+
+.org-select.active {
+  border-color: #0d6efd;
+  background-color: rgba(13, 110, 253, 0.1);
+}
+
+#query-result {
+  min-height: 150px;
+}

@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+  <div class="col-lg-4">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h5 class="card-title">Select an org</h5>
+        <p class="card-text">Choose a configured org to run SOQL queries.</p>
+        <div id="org-list">
+          {% if orgs %}
+            <div class="list-group">
+              {% for org in orgs %}
+                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center org-select" data-org="{{ org.id }}">
+                  <span>
+                    <strong>{{ org.label }}</strong>
+                    <span class="d-block small text-muted">{{ org.environment }}</span>
+                  </span>
+                  {% if org.access_token %}
+                    <span class="badge bg-success">Connected</span>
+                  {% else %}
+                    <span class="badge bg-secondary">Not connected</span>
+                  {% endif %}
+                </button>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted">No orgs yet. Add one from the org configuration page.</p>
+          {% endif %}
+        </div>
+        <a class="btn btn-outline-primary mt-3" href="{{ url_for('main.manage_orgs') }}">Manage orgs</a>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h6 class="card-title">Need help?</h6>
+        <p class="card-text">Follow the configuration checklist.</p>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('main.guide') }}">View guide</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">SOQL Explorer</h5>
+        <form id="query-form" class="mb-3">
+          <div class="mb-3">
+            <label class="form-label" for="selected-org">Selected Org</label>
+            <input id="selected-org" class="form-control" type="text" placeholder="Select an org" readonly />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="soql-query">SOQL Query</label>
+            <textarea id="soql-query" class="form-control" rows="5" placeholder="SELECT Id, Name FROM Account"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Run query</button>
+        </form>
+        <div id="query-result" class="table-responsive"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
