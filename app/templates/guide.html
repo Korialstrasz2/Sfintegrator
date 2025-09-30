@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h3 class="card-title">Salesforce OAuth Integration Checklist</h3>
+    <p class="text-muted">Follow these steps to connect this app with your Salesforce org.</p>
+
+    <h5>1. Prepare Salesforce</h5>
+    <ol>
+      <li>Sign in to the Salesforce org that you want to integrate.</li>
+      <li>Navigate to <strong>Setup &gt; Apps &gt; App Manager</strong> and click <em>New Connected App</em>.</li>
+      <li>Give the app a meaningful name, supply an email, and enable <strong>OAuth Settings for API Integration</strong>.</li>
+      <li>Set the <strong>Callback URL</strong> to <code>https://your-host/oauth/callback</code> (update it to match your deployment URL).</li>
+      <li>Select the following OAuth scopes: <code>Full access (full)</code> and <code>Perform requests on your behalf at any time (refresh_token, offline_access)</code>.</li>
+      <li>Save the connected app and copy the <strong>Consumer Key</strong> and <strong>Consumer Secret</strong>.</li>
+      <li>Under <strong>Manage &gt; OAuth Policies</strong>, ensure that the refresh token policy allows refresh token usage.</li>
+    </ol>
+
+    <h5>2. Configure the integrator</h5>
+    <ol>
+      <li>Open the <a href="{{ url_for('main.manage_orgs') }}">Org Configuration</a> page.</li>
+      <li>Fill in the form with:
+        <ul>
+          <li><strong>Org ID</strong>: an internal identifier such as <code>prod</code> or <code>dev</code>.</li>
+          <li><strong>Display name</strong>: friendly name shown in the UI.</li>
+          <li><strong>Environment</strong>: choose Production, Sandbox, or enter your custom My Domain URL.</li>
+          <li><strong>Consumer Key</strong> and <strong>Consumer Secret</strong> from the connected app.</li>
+          <li><strong>Redirect URI</strong>: must match the callback URL configured in Salesforce.</li>
+          <li><strong>OAuth Scope</strong>: default is <code>full refresh_token</code>; adjust if needed.</li>
+        </ul>
+      </li>
+      <li>Click <strong>Save org</strong>.</li>
+      <li>Use the <strong>Connect</strong> button in the table to start OAuth authorization.</li>
+      <li>Grant access in Salesforce when prompted; you will be redirected back to the app.</li>
+    </ol>
+
+    <h5>3. Run SOQL queries</h5>
+    <ol>
+      <li>Return to the <a href="{{ url_for('main.index') }}">Query</a> page.</li>
+      <li>Select the org you just authorized and paste a SOQL query, e.g. <code>SELECT Id, Name FROM Account LIMIT 10</code>.</li>
+      <li>Click <strong>Run query</strong> to execute. Results appear in a table below the form.</li>
+    </ol>
+
+    <div class="alert alert-info mt-4">
+      <strong>Tip:</strong> For local development, set your callback URL to <code>http://localhost:5000/oauth/callback</code> and add it to the connected app's list of allowed callbacks.
+    </div>
+  </div>
+</div>
+{% endblock %}
