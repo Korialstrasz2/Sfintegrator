@@ -8,10 +8,12 @@
     <h5>1. Prepare Salesforce</h5>
     <ol>
       <li>Sign in to the Salesforce org that you want to integrate.</li>
-      <li>Navigate to <strong>Setup &gt; Apps &gt; App Manager</strong> and click <em>New Connected App</em>.</li>
-      <li>Give the app a meaningful name, supply an email, and enable <strong>OAuth Settings for API Integration</strong>.</li>
-      <li>Set the <strong>Callback URL</strong> to <code>http://localhost:5000/oauth/callback</code> for local development; when deploying, replace <code>localhost:5000</code> with your host name while keeping the path <code>/oauth/callback</code>.</li>
-      <li>Select the following OAuth scopes: <code>Full access (full)</code> and <code>Perform requests on your behalf at any time (refresh_token, offline_access)</code>.</li>
+      <li>Navigate to <strong>Setup &gt; Apps &gt; App Manager</strong> and click <strong>New Connected App</strong> (Lightning Experience) rather than <em>New Lightning App</em> or <em>New External Client App</em>.</li>
+      <li>Fill out the basic information section: enter a descriptive <strong>Connected App Name</strong>, allow Salesforce to auto-populate the <strong>API Name</strong>, and provide a <strong>Contact Email</strong>; the remaining optional fields can stay blank unless your org requires them.</li>
+      <li>Enable <strong>OAuth Settings for API Integration</strong> to reveal the integration options.</li>
+      <li>Within the OAuth settings, leave <strong>Require Secret for Web Server Flow</strong> checked, keep the default <strong>Selected OAuth Scopes</strong> list empty for now, and skip optional fields such as <em>Start URL</em> or <em>Callback URL for Lightning Apps</em>.</li>
+      <li>Set the primary <strong>Callback URL</strong> to <code>http://localhost:5000/oauth/callback</code> for local development; when deploying, replace <code>localhost:5000</code> with your host name while keeping the path <code>/oauth/callback</code>.</li>
+      <li>Add the following OAuth scopes to the <strong>Selected OAuth Scopes</strong> list: <code>Full access (full)</code> and <code>Perform requests on your behalf at any time (refresh_token, offline_access)</code>. Other scopes can remain unselected unless your integration needs them.</li>
       <li>Save the connected app and copy the <strong>Consumer Key</strong> and <strong>Consumer Secret</strong>.</li>
       <li>Under <strong>Manage &gt; OAuth Policies</strong>, ensure that the refresh token policy allows refresh token usage.</li>
     </ol>
