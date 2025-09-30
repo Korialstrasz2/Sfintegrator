@@ -51,8 +51,93 @@
             <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
             <textarea id="soql-query" class="form-control" rows="5" placeholder="{{ t('index.query.soql_placeholder') }}"></textarea>
           </div>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button type="button" id="add-limit" class="btn btn-outline-secondary btn-sm">
+              {{ t('index.query.helpers.add_limit') }}
+            </button>
+            <button type="button" id="add-order-by" class="btn btn-outline-secondary btn-sm">
+              {{ t('index.query.helpers.add_order_by') }}
+            </button>
+          </div>
           <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
         </form>
+        <div class="row g-4 mt-1">
+          <div class="col-lg-6">
+            <div class="border rounded p-3 h-100">
+              <h6 class="mb-3">{{ t('index.query.saved_queries.title') }}</h6>
+              <form id="saved-query-form" class="row g-2 align-items-end">
+                <input type="hidden" id="saved-query-id" />
+                <div class="col-sm-7">
+                  <label class="form-label" for="saved-query-name">{{ t('index.query.saved_queries.name_label') }}</label>
+                  <input
+                    id="saved-query-name"
+                    class="form-control"
+                    type="text"
+                    placeholder="{{ t('index.query.saved_queries.name_placeholder') }}"
+                  />
+                </div>
+                <div class="col-sm-auto">
+                  <button
+                    type="submit"
+                    id="saved-query-submit"
+                    class="btn btn-success"
+                    data-label-save="{{ t('index.query.saved_queries.save_button') }}"
+                    data-label-update="{{ t('index.query.saved_queries.update_button') }}"
+                  >
+                    {{ t('index.query.saved_queries.save_button') }}
+                  </button>
+                </div>
+                <div class="col-sm-auto">
+                  <button type="button" id="saved-query-reset" class="btn btn-outline-secondary">
+                    {{ t('index.query.saved_queries.reset_button') }}
+                  </button>
+                </div>
+              </form>
+              <div class="mt-3">
+                <div id="saved-queries-empty" class="text-muted small">
+                  {{ t('index.query.saved_queries.empty') }}
+                </div>
+                <div
+                  id="saved-queries-list"
+                  class="list-group saved-query-list"
+                  data-label-load="{{ t('index.query.saved_queries.load_button') }}"
+                  data-label-delete="{{ t('index.query.saved_queries.delete_button') }}"
+                ></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="border rounded p-3 h-100">
+              <h6 class="mb-3">{{ t('index.query.autocomplete.title') }}</h6>
+              <div class="mb-3">
+                <label class="form-label" for="object-search">{{ t('index.query.autocomplete.objects_label') }}</label>
+                <input
+                  id="object-search"
+                  class="form-control"
+                  type="search"
+                  placeholder="{{ t('index.query.autocomplete.objects_placeholder') }}"
+                />
+                <div id="objects-loading" class="text-muted small d-none">
+                  {{ t('index.query.autocomplete.loading') }}
+                </div>
+                <div id="objects-empty" class="text-muted small">
+                  {{ t('index.query.autocomplete.objects_empty') }}
+                </div>
+                <div id="object-list" class="list-group metadata-list"></div>
+              </div>
+              <div>
+                <label class="form-label">{{ t('index.query.autocomplete.fields_label') }}</label>
+                <div id="fields-loading" class="text-muted small d-none">
+                  {{ t('index.query.autocomplete.loading') }}
+                </div>
+                <div id="fields-empty" class="text-muted small">
+                  {{ t('index.query.autocomplete.fields_empty') }}
+                </div>
+                <div id="field-list" class="list-group metadata-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div id="query-result" class="table-responsive"></div>
       </div>
     </div>

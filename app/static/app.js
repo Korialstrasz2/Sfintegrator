@@ -1,5 +1,13 @@
 const state = {
   selectedOrg: null,
+  savedQueries: [],
+  activeSavedQueryId: null,
+  metadata: {
+    objects: [],
+    fields: {},
+    selectedObject: null,
+    filter: "",
+  },
 };
 
 function translate(key, params = {}) {
@@ -42,20 +50,34 @@ function showToast(message, type = "success") {
   container.addEventListener("hidden.bs.toast", () => container.remove());
 }
 
+function showElement(element, shouldShow) {
+  if (!element) return;
+  if (shouldShow) {
+    element.classList.remove("d-none");
+  } else {
+    element.classList.add("d-none");
+  }
+}
+
 function bindOrgSelection() {
   document.querySelectorAll(".org-select").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedOrg = button.dataset.org;
       const label = button.querySelector("strong")?.textContent.trim() ?? button.textContent.trim();
-      document.getElementById("selected-org").value = label;
+      const selectedOrgInput = document.getElementById("selected-org");
+      if (selectedOrgInput) {
+        selectedOrgInput.value = label;
+      }
       document.querySelectorAll(".org-select").forEach((btn) => btn.classList.remove("active"));
       button.classList.add("active");
+      loadMetadataForSelectedOrg();
     });
   });
 }
 
 function renderQueryResult(data) {
   const container = document.getElementById("query-result");
+  if (!container) return;
   if (!data || !data.records || data.records.length === 0) {
     container.innerHTML = `<p class="text-muted">${translate("query.no_records")}</p>`;
     return;
@@ -87,6 +109,45 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+function insertIntoQuery(snippet) {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const before = textarea.value.slice(0, start);
+  const after = textarea.value.slice(end);
+  const needsSpaceBefore = before.length > 0 && !/\s$/.test(before);
+  const needsSpaceAfter = after.length > 0 && !/^\s/.test(after);
+  const insertion = `${needsSpaceBefore ? " " : ""}${snippet}${needsSpaceAfter ? " " : ""}`;
+  const newValue = `${before}${insertion}${after}`;
+  textarea.value = newValue;
+  const cursorPosition = before.length + insertion.length;
+  textarea.focus();
+  textarea.setSelectionRange(cursorPosition, cursorPosition);
+}
+
+function addClauseToQuery(clause) {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  const clauseUpper = clause.toUpperCase();
+  if (textarea.value.toUpperCase().includes(clauseUpper)) {
+    showToast(translate("toast.clause_exists", { clause }), "info");
+    return;
+  }
+  insertIntoQuery(clause);
+}
+
+function bindSnippetButtons() {
+  const limitButton = document.getElementById("add-limit");
+  if (limitButton) {
+    limitButton.addEventListener("click", () => addClauseToQuery("LIMIT 100"));
+  }
+  const orderByButton = document.getElementById("add-order-by");
+  if (orderByButton) {
+    orderByButton.addEventListener("click", () => addClauseToQuery("ORDER BY Created DESC"));
+  }
+}
+
 function bindQueryForm() {
   const form = document.getElementById("query-form");
   if (!form) return;
@@ -113,9 +174,420 @@ function bindQueryForm() {
       }
       renderQueryResult(data);
     } catch (error) {
-      showToast(error.message, "danger");
+      const message = error instanceof Error ? error.message : translate("toast.query_failed");
+      showToast(message, "danger");
     }
   });
+}
+
+async function loadSavedQueries() {
+  try {
+    const response = await fetch("/api/saved-queries");
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || translate("toast.saved_queries_load_failed"));
+    }
+    state.savedQueries = Array.isArray(data) ? data : [];
+    renderSavedQueries();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : translate("toast.saved_queries_load_failed");
+    showToast(message, "danger");
+  }
+}
+
+function renderSavedQueries() {
+  const list = document.getElementById("saved-queries-list");
+  const empty = document.getElementById("saved-queries-empty");
+  if (!list || !empty) return;
+  list.innerHTML = "";
+  if (!state.savedQueries.length) {
+    showElement(empty, true);
+    return;
+  }
+  showElement(empty, false);
+
+  const loadLabel = list.dataset.labelLoad || translate("saved_queries.load");
+  const deleteLabel = list.dataset.labelDelete || translate("saved_queries.delete");
+
+  state.savedQueries
+    .slice()
+    .sort((a, b) => a.label.localeCompare(b.label, window.APP_LANGUAGE || undefined, { sensitivity: "base" }))
+    .forEach((saved) => {
+      const item = document.createElement("div");
+      item.className = "list-group-item d-flex justify-content-between align-items-start gap-2";
+      item.setAttribute("role", "button");
+      if (state.activeSavedQueryId === saved.id) {
+        item.classList.add("active");
+      }
+
+      const textContainer = document.createElement("div");
+      textContainer.className = "flex-grow-1";
+      const title = document.createElement("div");
+      title.className = "fw-semibold";
+      title.textContent = saved.label;
+      textContainer.appendChild(title);
+      const preview = document.createElement("div");
+      preview.className = "small text-muted text-truncate";
+      preview.textContent = saved.soql;
+      textContainer.appendChild(preview);
+      item.appendChild(textContainer);
+
+      const actions = document.createElement("div");
+      actions.className = "btn-group btn-group-sm align-self-center";
+      const loadButton = document.createElement("button");
+      loadButton.type = "button";
+      loadButton.className = "btn btn-outline-primary";
+      loadButton.textContent = loadLabel;
+      loadButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        loadSavedQueryIntoForm(saved);
+      });
+      actions.appendChild(loadButton);
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "btn btn-outline-danger";
+      deleteButton.textContent = deleteLabel;
+      deleteButton.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try {
+          const response = await fetch(`/api/saved-queries/${encodeURIComponent(saved.id)}`, {
+            method: "DELETE",
+          });
+          if (!response.ok && response.status !== 204) {
+            throw new Error(translate("toast.saved_query_delete_failed"));
+          }
+          state.savedQueries = state.savedQueries.filter((itemSaved) => itemSaved.id !== saved.id);
+          if (state.activeSavedQueryId === saved.id) {
+            resetSavedQueryForm();
+          } else {
+            renderSavedQueries();
+          }
+          showToast(translate("toast.saved_query_deleted"), "info");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : translate("toast.saved_query_delete_failed");
+          showToast(message, "danger");
+        }
+      });
+      actions.appendChild(deleteButton);
+      item.appendChild(actions);
+
+      item.addEventListener("click", () => loadSavedQueryIntoForm(saved));
+
+      list.appendChild(item);
+    });
+}
+
+function resetSavedQueryForm() {
+  const form = document.getElementById("saved-query-form");
+  if (!form) return;
+  form.reset();
+  state.activeSavedQueryId = null;
+  const idInput = document.getElementById("saved-query-id");
+  if (idInput) {
+    idInput.value = "";
+  }
+  const submitButton = document.getElementById("saved-query-submit");
+  if (submitButton) {
+    submitButton.textContent = submitButton.dataset.labelSave || submitButton.textContent;
+  }
+  renderSavedQueries();
+}
+
+function loadSavedQueryIntoForm(saved) {
+  const nameInput = document.getElementById("saved-query-name");
+  const idInput = document.getElementById("saved-query-id");
+  const queryInput = document.getElementById("soql-query");
+  if (!nameInput || !idInput || !queryInput) return;
+  state.activeSavedQueryId = saved.id;
+  nameInput.value = saved.label;
+  idInput.value = saved.id;
+  queryInput.value = saved.soql;
+  queryInput.focus();
+  const submitButton = document.getElementById("saved-query-submit");
+  if (submitButton) {
+    submitButton.textContent = submitButton.dataset.labelUpdate || submitButton.textContent;
+  }
+  renderSavedQueries();
+  showToast(translate("toast.saved_query_loaded"), "info");
+}
+
+function bindSavedQueryForm() {
+  const form = document.getElementById("saved-query-form");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const nameInput = document.getElementById("saved-query-name");
+    const queryInput = document.getElementById("soql-query");
+    const idInput = document.getElementById("saved-query-id");
+    if (!nameInput || !queryInput || !idInput) return;
+    const label = nameInput.value.trim();
+    const soql = queryInput.value.trim();
+    if (!soql) {
+      showToast(translate("toast.enter_query"), "warning");
+      return;
+    }
+    if (!label) {
+      showToast(translate("toast.enter_saved_query_name"), "warning");
+      return;
+    }
+    try {
+      const payload = {
+        id: idInput.value.trim() || null,
+        label,
+        soql,
+      };
+      const response = await fetch("/api/saved-queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || translate("toast.saved_query_save_failed"));
+      }
+      const existingIndex = state.savedQueries.findIndex((item) => item.id === data.id);
+      if (existingIndex >= 0) {
+        state.savedQueries[existingIndex] = data;
+      } else {
+        state.savedQueries.push(data);
+      }
+      state.activeSavedQueryId = data.id;
+      idInput.value = data.id;
+      const submitButton = document.getElementById("saved-query-submit");
+      if (submitButton) {
+        submitButton.textContent = submitButton.dataset.labelUpdate || submitButton.textContent;
+      }
+      renderSavedQueries();
+      showToast(translate("toast.saved_query_saved"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : translate("toast.saved_query_save_failed");
+      showToast(message, "danger");
+    }
+  });
+
+  const resetButton = document.getElementById("saved-query-reset");
+  if (resetButton) {
+    resetButton.addEventListener("click", () => resetSavedQueryForm());
+  }
+}
+
+function initializeSavedQueries() {
+  resetSavedQueryForm();
+  bindSavedQueryForm();
+  loadSavedQueries();
+}
+
+function clearMetadata() {
+  state.metadata.objects = [];
+  state.metadata.fields = {};
+  state.metadata.selectedObject = null;
+  state.metadata.filter = "";
+  renderObjectList();
+  renderFieldList([]);
+}
+
+async function loadMetadataForSelectedOrg() {
+  const searchInput = document.getElementById("object-search");
+  if (searchInput) {
+    searchInput.value = "";
+    searchInput.disabled = !state.selectedOrg;
+  }
+  state.metadata.filter = "";
+  state.metadata.objects = [];
+  state.metadata.fields = {};
+  state.metadata.selectedObject = null;
+  renderObjectList();
+  renderFieldList([]);
+  if (!state.selectedOrg) {
+    return;
+  }
+  const loading = document.getElementById("objects-loading");
+  showElement(loading, true);
+  showElement(document.getElementById("objects-empty"), false);
+  try {
+    const response = await fetch(`/api/sobjects?org_id=${encodeURIComponent(state.selectedOrg)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || translate("toast.metadata_fetch_failed"));
+    }
+    state.metadata.objects = Array.isArray(data) ? data : [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : translate("toast.metadata_fetch_failed");
+    showToast(message, "danger");
+  } finally {
+    showElement(loading, false);
+    renderObjectList();
+  }
+}
+
+function renderObjectList(filterText = state.metadata.filter) {
+  const list = document.getElementById("object-list");
+  const empty = document.getElementById("objects-empty");
+  if (!list || !empty) return;
+  const normalizedFilter = (filterText || "").toLowerCase();
+  state.metadata.filter = filterText || "";
+  list.innerHTML = "";
+  if (!state.metadata.objects.length) {
+    showElement(empty, true);
+    return;
+  }
+
+  const objects = state.metadata.objects.filter((item) => {
+    if (!normalizedFilter) return true;
+    const nameMatch = item.name?.toLowerCase().includes(normalizedFilter);
+    const labelMatch = item.label?.toLowerCase().includes(normalizedFilter);
+    return nameMatch || labelMatch;
+  });
+
+  if (!objects.length) {
+    showElement(empty, true);
+    return;
+  }
+
+  showElement(empty, false);
+
+  objects
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+    .forEach((object) => {
+      const item = document.createElement("div");
+      item.className = "list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2";
+      item.setAttribute("role", "button");
+      if (state.metadata.selectedObject === object.name) {
+        item.classList.add("active");
+      }
+      item.addEventListener("click", () => selectObject(object.name));
+
+      const textContainer = document.createElement("div");
+      textContainer.className = "flex-grow-1";
+      const nameEl = document.createElement("div");
+      nameEl.className = "fw-semibold";
+      nameEl.textContent = object.name;
+      textContainer.appendChild(nameEl);
+      if (object.label && object.label !== object.name) {
+        const labelEl = document.createElement("div");
+        labelEl.className = "small text-muted";
+        labelEl.textContent = object.label;
+        textContainer.appendChild(labelEl);
+      }
+      item.appendChild(textContainer);
+
+      const insertButton = document.createElement("button");
+      insertButton.type = "button";
+      insertButton.className = "btn btn-sm btn-outline-secondary align-self-center";
+      insertButton.textContent = translate("autocomplete.insert");
+      insertButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        insertIntoQuery(object.name);
+      });
+      item.appendChild(insertButton);
+
+      list.appendChild(item);
+    });
+}
+
+function selectObject(objectName) {
+  if (!objectName) return;
+  state.metadata.selectedObject = objectName;
+  renderObjectList();
+  renderFieldList([]);
+  loadFieldsForObject(objectName);
+}
+
+async function loadFieldsForObject(objectName) {
+  if (!state.selectedOrg || !objectName) return;
+  if (state.metadata.fields[objectName]) {
+    renderFieldList(state.metadata.fields[objectName]);
+    return;
+  }
+  const loading = document.getElementById("fields-loading");
+  showElement(loading, true);
+  showElement(document.getElementById("fields-empty"), false);
+  try {
+    const response = await fetch(
+      `/api/sobjects/${encodeURIComponent(objectName)}/fields?org_id=${encodeURIComponent(state.selectedOrg)}`
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || translate("toast.fields_fetch_failed"));
+    }
+    state.metadata.fields[objectName] = Array.isArray(data) ? data : [];
+    renderFieldList(state.metadata.fields[objectName]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : translate("toast.fields_fetch_failed");
+    showToast(message, "danger");
+    renderFieldList([]);
+  } finally {
+    showElement(loading, false);
+  }
+}
+
+function renderFieldList(fields = null) {
+  const list = document.getElementById("field-list");
+  const empty = document.getElementById("fields-empty");
+  if (!list || !empty) return;
+  let values = fields;
+  if (values === null) {
+    values = state.metadata.selectedObject
+      ? state.metadata.fields[state.metadata.selectedObject] || []
+      : [];
+  }
+  list.innerHTML = "";
+  if (!values.length) {
+    showElement(empty, true);
+    return;
+  }
+  showElement(empty, false);
+
+  values
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+    .forEach((field) => {
+      const item = document.createElement("div");
+      item.className = "list-group-item list-group-item-action";
+      item.setAttribute("role", "button");
+
+      const row = document.createElement("div");
+      row.className = "d-flex justify-content-between align-items-center gap-2";
+
+      const textContainer = document.createElement("div");
+      textContainer.className = "flex-grow-1";
+      const nameEl = document.createElement("div");
+      nameEl.className = "fw-semibold";
+      nameEl.textContent = field.name;
+      textContainer.appendChild(nameEl);
+      if (field.label && field.label !== field.name) {
+        const labelEl = document.createElement("div");
+        labelEl.className = "small text-muted";
+        labelEl.textContent = field.label;
+        textContainer.appendChild(labelEl);
+      }
+      row.appendChild(textContainer);
+
+      if (field.type) {
+        const badge = document.createElement("span");
+        badge.className = "badge bg-light text-dark";
+        badge.textContent = field.type;
+        row.appendChild(badge);
+      }
+
+      item.appendChild(row);
+      item.addEventListener("click", () => insertIntoQuery(field.name));
+      list.appendChild(item);
+    });
+}
+
+function initializeAutocomplete() {
+  const searchInput = document.getElementById("object-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", (event) => {
+      renderObjectList(event.target.value || "");
+    });
+    searchInput.disabled = !state.selectedOrg;
+  }
+  renderObjectList();
+  renderFieldList([]);
 }
 
 function updateCustomEnvironmentVisibility(selectElement) {
@@ -198,7 +670,8 @@ function bindOrgForm() {
       );
       window.location.reload();
     } catch (error) {
-      showToast(error.message, "danger");
+      const message = error instanceof Error ? error.message : translate("toast.save_failed");
+      showToast(message, "danger");
     }
   });
 
@@ -252,4 +725,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bindOrgSelection();
   bindQueryForm();
   bindOrgForm();
+  bindSnippetButtons();
+  initializeSavedQueries();
+  initializeAutocomplete();
+  loadMetadataForSelectedOrg();
 });
