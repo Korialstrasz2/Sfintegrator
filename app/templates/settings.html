@@ -5,9 +5,9 @@
     <div class="card shadow-sm">
       <div class="card-body">
         <h5 class="card-title">{{ t('settings.title') }}</h5>
-        {% if language_saved %}
+        {% if settings_saved %}
           <div class="alert alert-success" role="status">
-            {{ t('settings.language_saved') }}
+            {{ t('settings.saved') }}
           </div>
         {% endif %}
         <form method="post">
@@ -21,7 +21,17 @@
               {% endfor %}
             </select>
           </div>
-          <button class="btn btn-primary" type="submit">{{ t('settings.language_submit') }}</button>
+          <div class="mb-3">
+            <label class="form-label" for="theme">{{ t('settings.theme_label') }}</label>
+            <select class="form-select" id="theme" name="theme">
+              {% for theme in available_themes %}
+                <option value="{{ theme.id }}" {% if theme.id == current_theme %}selected{% endif %}>
+                  {{ theme.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">{{ t('settings.save_button') }}</button>
         </form>
       </div>
     </div>
