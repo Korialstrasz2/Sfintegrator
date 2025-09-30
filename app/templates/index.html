@@ -4,8 +4,8 @@
   <div class="col-lg-4">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h5 class="card-title">Select an org</h5>
-        <p class="card-text">Choose a configured org to run SOQL queries.</p>
+        <h5 class="card-title">{{ t('index.select_org.title') }}</h5>
+        <p class="card-text">{{ t('index.select_org.description') }}</p>
         <div id="org-list">
           {% if orgs %}
             <div class="list-group">
@@ -16,42 +16,42 @@
                     <span class="d-block small text-muted">{{ org.environment }}</span>
                   </span>
                   {% if org.access_token %}
-                    <span class="badge bg-success">Connected</span>
+                    <span class="badge bg-success">{{ t('index.select_org.connected_badge') }}</span>
                   {% else %}
-                    <span class="badge bg-secondary">Not connected</span>
+                    <span class="badge bg-secondary">{{ t('index.select_org.not_connected_badge') }}</span>
                   {% endif %}
                 </button>
               {% endfor %}
             </div>
           {% else %}
-            <p class="text-muted">No orgs yet. Add one from the org configuration page.</p>
+            <p class="text-muted">{{ t('index.select_org.empty') }}</p>
           {% endif %}
         </div>
-        <a class="btn btn-outline-primary mt-3" href="{{ url_for('main.manage_orgs') }}">Manage orgs</a>
+        <a class="btn btn-outline-primary mt-3" href="{{ url_for('main.manage_orgs') }}">{{ t('index.select_org.manage_button') }}</a>
       </div>
     </div>
     <div class="card shadow-sm">
       <div class="card-body">
-        <h6 class="card-title">Need help?</h6>
-        <p class="card-text">Follow the configuration checklist.</p>
-        <a class="btn btn-sm btn-primary" href="{{ url_for('main.guide') }}">View guide</a>
+        <h6 class="card-title">{{ t('index.help.title') }}</h6>
+        <p class="card-text">{{ t('index.help.description') }}</p>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('main.guide') }}">{{ t('index.help.guide_button') }}</a>
       </div>
     </div>
   </div>
   <div class="col-lg-8">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h5 class="card-title">SOQL Explorer</h5>
+        <h5 class="card-title">{{ t('index.query.title') }}</h5>
         <form id="query-form" class="mb-3">
           <div class="mb-3">
-            <label class="form-label" for="selected-org">Selected Org</label>
-            <input id="selected-org" class="form-control" type="text" placeholder="Select an org" readonly />
+            <label class="form-label" for="selected-org">{{ t('index.query.selected_org_label') }}</label>
+            <input id="selected-org" class="form-control" type="text" placeholder="{{ t('index.query.selected_org_placeholder') }}" readonly />
           </div>
           <div class="mb-3">
-            <label class="form-label" for="soql-query">SOQL Query</label>
-            <textarea id="soql-query" class="form-control" rows="5" placeholder="SELECT Id, Name FROM Account"></textarea>
+            <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
+            <textarea id="soql-query" class="form-control" rows="5" placeholder="{{ t('index.query.soql_placeholder') }}"></textarea>
           </div>
-          <button type="submit" class="btn btn-primary">Run query</button>
+          <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
         </form>
         <div id="query-result" class="table-responsive"></div>
       </div>

@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">{{ t('settings.title') }}</h5>
+        {% if language_saved %}
+          <div class="alert alert-success" role="status">
+            {{ t('settings.language_saved') }}
+          </div>
+        {% endif %}
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label" for="language">{{ t('settings.language_label') }}</label>
+            <select class="form-select" id="language" name="language">
+              {% for language in available_languages %}
+                <option value="{{ language.code }}" {% if language.code == current_language %}selected{% endif %}>
+                  {{ language.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">{{ t('settings.language_submit') }}</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -4,46 +4,46 @@
   <div class="col-lg-5">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h5 class="card-title">Add or update an org</h5>
+        <h5 class="card-title">{{ t('orgs.form.title') }}</h5>
         <form id="org-form">
           <div class="mb-3">
-            <label class="form-label" for="org-id">Org ID</label>
-            <input class="form-control" id="org-id" required placeholder="unique-id" />
-            <div class="form-text">Use a unique identifier (e.g. prod, sandbox1).</div>
+            <label class="form-label" for="org-id">{{ t('orgs.form.id_label') }}</label>
+            <input class="form-control" id="org-id" required placeholder="{{ t('orgs.form.id_placeholder') }}" />
+            <div class="form-text">{{ t('orgs.form.id_help') }}</div>
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-label">Display name</label>
-            <input class="form-control" id="org-label" required placeholder="Production Org" />
+            <label class="form-label" for="org-label">{{ t('orgs.form.label_label') }}</label>
+            <input class="form-control" id="org-label" required placeholder="{{ t('orgs.form.label_placeholder') }}" />
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-environment">Environment</label>
+            <label class="form-label" for="org-environment">{{ t('orgs.form.environment_label') }}</label>
             <select class="form-select" id="org-environment" required>
-              <option value="production">Production (login.salesforce.com)</option>
-              <option value="sandbox">Sandbox (test.salesforce.com)</option>
-              <option value="custom">Custom Domain</option>
+              <option value="production">{{ t('orgs.form.environment_production') }}</option>
+              <option value="sandbox">{{ t('orgs.form.environment_sandbox') }}</option>
+              <option value="custom">{{ t('orgs.form.environment_custom') }}</option>
             </select>
-            <input class="form-control mt-2 d-none" id="org-custom-environment" placeholder="https://your-domain.my.salesforce.com" />
-            <div class="form-text">Select custom to use a My Domain login URL.</div>
+            <input class="form-control mt-2 d-none" id="org-custom-environment" placeholder="{{ t('orgs.form.environment_custom_placeholder') }}" />
+            <div class="form-text">{{ t('orgs.form.environment_help') }}</div>
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-client-id">Consumer Key (Client ID)</label>
+            <label class="form-label" for="org-client-id">{{ t('orgs.form.client_id_label') }}</label>
             <input class="form-control" id="org-client-id" required />
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-client-secret">Consumer Secret</label>
+            <label class="form-label" for="org-client-secret">{{ t('orgs.form.client_secret_label') }}</label>
             <input class="form-control" id="org-client-secret" />
-            <div class="form-text">Leave blank to keep the existing secret when editing.</div>
+            <div class="form-text">{{ t('orgs.form.client_secret_help') }}</div>
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-redirect-uri">Redirect URI</label>
-            <input class="form-control" id="org-redirect-uri" placeholder="https://yourapp.com/oauth/callback" required />
+            <label class="form-label" for="org-redirect-uri">{{ t('orgs.form.redirect_uri_label') }}</label>
+            <input class="form-control" id="org-redirect-uri" placeholder="{{ t('orgs.form.redirect_uri_placeholder') }}" required />
           </div>
           <div class="mb-3">
-            <label class="form-label" for="org-scope">OAuth Scope</label>
-            <input class="form-control" id="org-scope" value="full refresh_token" />
+            <label class="form-label" for="org-scope">{{ t('orgs.form.scope_label') }}</label>
+            <input class="form-control" id="org-scope" value="{{ t('orgs.form.scope_default') }}" />
           </div>
-          <button class="btn btn-primary" id="org-form-submit" type="submit">Save org</button>
-          <button class="btn btn-link" id="org-form-reset" type="button">Clear form</button>
+          <button class="btn btn-primary" id="org-form-submit" type="submit">{{ t('orgs.form.save_button') }}</button>
+          <button class="btn btn-link" id="org-form-reset" type="button">{{ t('orgs.form.clear_button') }}</button>
         </form>
       </div>
     </div>
@@ -51,18 +51,18 @@
   <div class="col-lg-7">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h5 class="card-title">Configured orgs</h5>
+        <h5 class="card-title">{{ t('orgs.table.title') }}</h5>
         <div id="org-table-container">
           {% if orgs %}
             <div class="table-responsive">
               <table class="table table-striped align-middle">
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>Label</th>
-                    <th>Environment</th>
-                    <th>Status</th>
-                    <th></th>
+                    <th>{{ t('orgs.table.headers.id') }}</th>
+                    <th>{{ t('orgs.table.headers.label') }}</th>
+                    <th>{{ t('orgs.table.headers.environment') }}</th>
+                    <th>{{ t('orgs.table.headers.status') }}</th>
+                    <th>{{ t('orgs.table.headers.actions') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -79,16 +79,16 @@
                       <td>{{ org.environment }}</td>
                       <td>
                         {% if org.access_token %}
-                          <span class="badge bg-success">Connected</span>
+                          <span class="badge bg-success">{{ t('orgs.table.connected_badge') }}</span>
                         {% else %}
-                          <span class="badge bg-secondary">Not connected</span>
+                          <span class="badge bg-secondary">{{ t('orgs.table.not_connected_badge') }}</span>
                         {% endif %}
                       </td>
                       <td class="text-end">
                         <div class="btn-group btn-group-sm">
-                          <a class="btn btn-outline-primary" href="{{ url_for('main.start_auth', org_id=org.id) }}">Connect</a>
-                          <button class="btn btn-outline-secondary org-edit">Edit</button>
-                          <button class="btn btn-outline-danger org-delete">Delete</button>
+                          <a class="btn btn-outline-primary" href="{{ url_for('main.start_auth', org_id=org.id) }}">{{ t('orgs.table.actions.connect') }}</a>
+                          <button class="btn btn-outline-secondary org-edit">{{ t('orgs.table.actions.edit') }}</button>
+                          <button class="btn btn-outline-danger org-delete">{{ t('orgs.table.actions.delete') }}</button>
                         </div>
                       </td>
                     </tr>
@@ -97,7 +97,7 @@
               </table>
             </div>
           {% else %}
-            <p class="text-muted">No orgs configured yet.</p>
+            <p class="text-muted">{{ t('orgs.table.empty') }}</p>
           {% endif %}
         </div>
       </div>
