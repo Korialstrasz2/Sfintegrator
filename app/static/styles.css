@@ -196,6 +196,38 @@ body.theme-sci-fi {
   border-color: rgba(59, 130, 246, 0.35);
 }
 
+.query-layout {
+  position: relative;
+}
+
+.query-sidebar {
+  z-index: 2;
+}
+
+@media (min-width: 1400px) {
+  .query-layout {
+    --query-sidebar-width: clamp(300px, 26vw, 380px);
+    --query-sidebar-gap: 1.5rem;
+  }
+
+  .query-layout .query-main {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .query-layout .query-sidebar {
+    position: absolute;
+    top: 0;
+    right: calc(var(--query-sidebar-gap) - ((100vw - 100%) / 2));
+    width: var(--query-sidebar-width);
+  }
+
+  .query-layout .query-sidebar .sticky-sidebar {
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+  }
+}
+
 @media (min-width: 1200px) {
   .sticky-sidebar {
     position: sticky;
