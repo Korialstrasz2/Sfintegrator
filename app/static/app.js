@@ -1275,13 +1275,8 @@ function bindQueryForm() {
     const hasLimit = /\bLIMIT\b/i.test(query);
     const hasWhere = /\bWHERE\b/i.test(query);
     if (!hasLimit && !hasWhere) {
-      const message = translate("frontend.confirm.query_without_limit_where");
-      if (typeof window.confirm === "function") {
-        const shouldProceed = window.confirm(message);
-        if (!shouldProceed) {
-          return;
-        }
-      }
+      showToast(translate("frontend.toast.query_without_limit_where"), "danger");
+      return;
     }
 
     saveQueryDraftToStorage(queryInput?.value ?? query);

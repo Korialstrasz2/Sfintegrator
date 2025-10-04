@@ -216,6 +216,7 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "results_export_ready_csv": "CSV download started",
                 "results_export_ready_excel": "Excel download started",
                 "results_export_failed": "Unable to export results",
+                "query_without_limit_where": "Add a WHERE or LIMIT clause before running the query.",
             },
             "query": {
                 "no_records": "No records returned.",
@@ -448,6 +449,7 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "results_export_ready_csv": "Download CSV avviato",
                 "results_export_ready_excel": "Download Excel avviato",
                 "results_export_failed": "Impossibile esportare i risultati",
+                "query_without_limit_where": "Aggiungi una clausola WHERE o LIMIT prima di eseguire la query.",
             },
             "query": {
                 "no_records": "Nessun record restituito.",
