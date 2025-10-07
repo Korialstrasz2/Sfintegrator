@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import uuid
@@ -12,7 +13,7 @@ from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set
 from flask import session
 
 from . import data_import
-from .salesforce import describe_sobject, query_all
+from .salesforce import SalesforceError, describe_sobject, query_all
 from .storage import DATA_DIR, OrgConfig
 
 ACCOUNT_EXPLORER_SESSION_KEY = "account_explorer_session_id"
@@ -160,6 +161,77 @@ class ExplorerSession:
 _config_lock = threading.Lock()
 _sessions_lock = threading.Lock()
 _sessions: Dict[str, ExplorerSession] = {}
+
+logger = logging.getLogger(__name__)
+
+
+_RECOVERABLE_ERROR_CODES: Set[str] = {
+    "INVALID_TYPE",
+    "INVALID_FIELD",
+    "INVALID_FIELD_FOR_INSERT_UPDATE",
+}
+
+
+def _parse_salesforce_error(exc: SalesforceError) -> List[Dict[str, object]]:
+    message = str(exc)
+    match = re.search(r"Salesforce request failed: (.+)", message)
+    if not match:
+        return []
+    raw = match.group(1)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        return [data]
+    return []
+
+
+def _is_recoverable_salesforce_error(exc: SalesforceError) -> bool:
+    for item in _parse_salesforce_error(exc):
+        code = item.get("errorCode")
+        if isinstance(code, str) and code in _RECOVERABLE_ERROR_CODES:
+            return True
+    return False
+
+
+def _format_salesforce_error_message(object_key: str, exc: SalesforceError) -> str:
+    label = _OBJECT_DEFINITIONS.get(object_key, {}).get("label", object_key)
+    messages: List[str] = []
+    for item in _parse_salesforce_error(exc):
+        if not isinstance(item, dict):
+            continue
+        text = item.get("message")
+        code = item.get("errorCode")
+        if text and code:
+            messages.append(f"{text} ({code})")
+        elif text:
+            messages.append(str(text))
+        elif code:
+            messages.append(str(code))
+    if not messages:
+        messages.append(str(exc))
+    return f"{label}: {'; '.join(messages)}"
+
+
+def _query_all_with_handling(
+    org: OrgConfig,
+    soql: str,
+    object_key: str,
+    warnings: MutableMapping[str, str],
+    required: bool = False,
+) -> Dict[str, object]:
+    try:
+        return query_all(org, soql)
+    except SalesforceError as exc:
+        if not required and _is_recoverable_salesforce_error(exc):
+            if object_key not in warnings:
+                warnings[object_key] = _format_salesforce_error_message(object_key, exc)
+                logger.warning("Skipping %s due to Salesforce error: %s", object_key, exc)
+            return {"records": []}
+        raise
 
 
 def _ensure_session_id() -> str:
@@ -374,13 +446,14 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
 
     config = get_config()
     results: Dict[str, List[Dict[str, object]]] = {}
+    warnings: Dict[str, str] = {}
 
     # Query accounts first
     account_query_fields, account_display_fields = _build_query_fields("Account", config)
     account_records: Dict[str, Dict[str, object]] = {}
     for chunk in _chunk(sanitized_ids, 100):
         soql = f"SELECT {', '.join(account_query_fields)} FROM Account WHERE Id IN ({_format_ids_for_soql(chunk)})"
-        data = query_all(org, soql)
+        data = _query_all_with_handling(org, soql, "Account", warnings, required=True)
         for record in data.get("records", []):
             record_id = record.get("Id")
             if not record_id:
@@ -404,10 +477,12 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         query_fields, display_fields = _build_query_fields(object_key, config)
         records: List[Dict[str, object]] = []
         for chunk in _chunk(sanitized_ids, 100):
+            if object_key in warnings:
+                break
             soql = (
                 f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {filter_field} IN ({_format_ids_for_soql(chunk)})"
             )
-            data = query_all(org, soql)
+            data = _query_all_with_handling(org, soql, object_key, warnings)
             records.extend(data.get("records", []))
         results[object_key] = records
 
@@ -422,8 +497,10 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     individual_records: Dict[str, Dict[str, object]] = {}
     if individual_ids:
         for chunk in _chunk(individual_ids, 100):
+            if "Individual" in warnings:
+                break
             soql = f"SELECT {', '.join(individual_query_fields)} FROM Individual WHERE Id IN ({_format_ids_for_soql(chunk)})"
-            data = query_all(org, soql)
+            data = _query_all_with_handling(org, soql, "Individual", warnings)
             for record in data.get("records", []):
                 record_id = record.get("Id")
                 if record_id:
@@ -438,10 +515,12 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         records: List[Dict[str, object]] = []
         if individual_ids:
             for chunk in _chunk(individual_ids, 100):
+                if object_key in warnings:
+                    break
                 soql = (
                     f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE ParentId IN ({_format_ids_for_soql(chunk)})"
                 )
-                data = query_all(org, soql)
+                data = _query_all_with_handling(org, soql, object_key, warnings)
                 records.extend(data.get("records", []))
         results[object_key] = records
         contact_point_mappings[object_key] = _aggregate_contact_points(records)
@@ -456,6 +535,8 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         "config": {key: config.get_fields(key) for key in _OBJECT_DEFINITIONS.keys()},
         "summary": {},
     }
+    if warnings:
+        explorer_data["warnings"] = dict(warnings)
 
     summary_counts: Dict[str, int] = {}
     for obj in CONNECTED_OBJECTS:

@@ -1,7 +1,17 @@
 (function () {
   function translateKey(key, params = {}) {
     if (typeof translate === "function") {
-      return translate(key, params);
+      const normalizedKey =
+        typeof key === "string" && key.startsWith("frontend.")
+          ? key.slice("frontend.".length)
+          : key;
+      const translated = translate(normalizedKey, params);
+      if (translated !== normalizedKey) {
+        return translated;
+      }
+      if (normalizedKey !== key) {
+        return key;
+      }
     }
     return key;
   }
@@ -63,12 +73,16 @@
             return;
           }
           const current = orgSelect.value;
+          const existingPlaceholder = orgSelect.querySelector(
+            'option[value=""]'
+          );
+          const placeholderText = existingPlaceholder?.textContent?.trim()
+            ? existingPlaceholder.textContent.trim()
+            : translateKey("settings.account_explorer.org_placeholder");
           orgSelect.innerHTML = "";
           const placeholder = document.createElement("option");
           placeholder.value = "";
-          placeholder.textContent = translateKey(
-            "settings.account_explorer.org_placeholder"
-          );
+          placeholder.textContent = placeholderText;
           orgSelect.appendChild(placeholder);
           data.forEach((org) => {
             const option = document.createElement("option");

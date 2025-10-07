@@ -5,7 +5,17 @@
 
   function translateKey(key, params = {}) {
     if (typeof translate === "function") {
-      return translate(key, params);
+      const normalizedKey =
+        typeof key === "string" && key.startsWith("frontend.")
+          ? key.slice("frontend.".length)
+          : key;
+      const translated = translate(normalizedKey, params);
+      if (translated !== normalizedKey) {
+        return translated;
+      }
+      if (normalizedKey !== key) {
+        return key;
+      }
     }
     return key;
   }
@@ -116,10 +126,16 @@
             return;
           }
           const currentValue = orgSelect.value;
+          const existingPlaceholder = orgSelect.querySelector(
+            'option[value=""]'
+          );
+          const placeholderText = existingPlaceholder?.textContent?.trim()
+            ? existingPlaceholder.textContent.trim()
+            : translateKey("account_explorer.run.org_placeholder");
           orgSelect.innerHTML = "";
           const placeholder = document.createElement("option");
           placeholder.value = "";
-          placeholder.textContent = translateKey("account_explorer.run.org_placeholder");
+          placeholder.textContent = placeholderText;
           orgSelect.appendChild(placeholder);
           data.forEach((org) => {
             const option = document.createElement("option");
@@ -269,6 +285,19 @@
         resultsPlaceholder.classList.remove("d-none");
         recordCountBadge.hidden = true;
         renderMissingAccounts(result?.missingAccountIds || []);
+        const warnings = result?.data?.warnings;
+        if (warnings && typeof warnings === "object") {
+          const warningMessages = Object.values(warnings)
+            .filter((value) => typeof value === "string" && value.trim())
+            .map((value) => value.trim());
+          if (warningMessages.length) {
+            setStatus(warningMessages.join(" • "), "warning");
+          } else {
+            setStatus("", "muted");
+          }
+        } else {
+          setStatus("", "muted");
+        }
         return;
       }
       resultsPlaceholder.classList.add("d-none");
@@ -306,13 +335,28 @@
         });
       }
       renderMissingAccounts(result.missingAccountIds || []);
+      const warnings = result.data?.warnings;
+      const warningMessages = [];
+      if (warnings && typeof warnings === "object") {
+        Object.values(warnings).forEach((value) => {
+          if (typeof value === "string" && value.trim()) {
+            warningMessages.push(value.trim());
+          }
+        });
+      }
+      const statusMessages = [...warningMessages];
+      let statusType = warningMessages.length ? "warning" : "muted";
       if (result.generatedAt) {
-        setStatus(
+        statusMessages.push(
           translateKey("account_explorer.run.generated_at", {
             timestamp: formatTimestampValue(result.generatedAt),
-          }),
-          "muted"
+          })
         );
+      }
+      if (statusMessages.length) {
+        setStatus(statusMessages.join(" • "), statusType);
+      } else {
+        setStatus("", "muted");
       }
       updateRunState();
     }
@@ -419,21 +463,46 @@
         )
         .then(({ ok, data }) => {
           if (!ok) {
-            const code = data?.code || "run_failed";
-            throw new Error(code);
+            const code = typeof data?.code === "string" ? data.code : null;
+            const serverMessage =
+              !code && typeof data?.error === "string" ? data.error : null;
+            if (serverMessage) {
+              throw new Error(`server:${serverMessage}`);
+            }
+            throw new Error(code || "run_failed");
           }
           explorerResult = data;
           renderResults(explorerResult);
           showToast(translateKey("frontend.account_explorer.run_success"), "success");
         })
         .catch((error) => {
+          if (error instanceof Error && error.message.startsWith("server:")) {
+            const message = error.message.slice("server:".length).trim();
+            const fallback = translateKey("frontend.account_explorer.run_failed");
+            const displayMessage = message || fallback;
+            showToast(displayMessage, "danger");
+            setStatus(displayMessage, "danger");
+            return;
+          }
           const code = error instanceof Error ? error.message : "run_failed";
-          showToast(
-            translateKey(`frontend.account_explorer.errors.${code}`) ||
-              translateKey("frontend.account_explorer.run_failed"),
-            "danger"
-          );
-          setStatus("", "muted");
+          const translationKeys = [
+            `frontend.account_explorer.errors.${code}`,
+            `frontend.account_explorer.${code}`,
+          ];
+          let message = "";
+          translationKeys.some((key) => {
+            const translated = translateKey(key);
+            if (translated !== key) {
+              message = translated;
+              return true;
+            }
+            return false;
+          });
+          if (!message) {
+            message = translateKey("frontend.account_explorer.run_failed");
+          }
+          showToast(message, "danger");
+          setStatus(message, "danger");
         })
         .finally(() => {
           runButton.disabled = false;
