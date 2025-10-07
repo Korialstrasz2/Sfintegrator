@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">{{ t('account_explorer.input.title') }}</h5>
+        <p class="text-muted small">{{ t('account_explorer.input.description', limit=account_explorer_limit) }}</p>
+        <div class="mb-3">
+          <label class="form-label" for="account-explorer-file">{{ t('account_explorer.input.file_label') }}</label>
+          <input class="form-control" type="file" id="account-explorer-file" accept=".csv,.xlsx,.xls,.xlsm,.xltx,.xltm,.xlam" />
+          <div class="form-text">{{ t('account_explorer.input.file_help') }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="account-explorer-text">{{ t('account_explorer.input.text_label') }}</label>
+          <textarea class="form-control" id="account-explorer-text" rows="4" placeholder="001XXXXXXXXXXXXXXX"></textarea>
+          <div class="form-text">{{ t('account_explorer.input.text_help') }}</div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary" type="button" id="account-explorer-parse">{{ t('account_explorer.input.parse_button') }}</button>
+          <button class="btn btn-outline-secondary" type="button" id="account-explorer-clear">{{ t('account_explorer.input.clear_button') }}</button>
+        </div>
+        <hr />
+        <div>
+          <h6 class="fw-semibold">{{ t('account_explorer.input.preview_title') }}</h6>
+          <div id="account-explorer-preview-empty" class="text-muted small">{{ t('account_explorer.input.preview_empty') }}</div>
+          <ul class="list-group list-group-flush small d-none" id="account-explorer-preview-list"></ul>
+        </div>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h5 class="card-title">{{ t('account_explorer.run.title') }}</h5>
+        <div class="mb-3">
+          <label class="form-label" for="account-explorer-org">{{ t('account_explorer.run.org_label') }}</label>
+          <select class="form-select" id="account-explorer-org">
+            <option value="">{{ t('account_explorer.run.org_placeholder') }}</option>
+          </select>
+          <div class="form-text">{{ t('account_explorer.run.org_help') }}</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-success" type="button" id="account-explorer-run">{{ t('account_explorer.run.button') }}</button>
+          <button class="btn btn-outline-primary" type="button" id="account-explorer-download" disabled>{{ t('account_explorer.run.download') }}</button>
+        </div>
+        <div class="mt-3 small text-muted" id="account-explorer-status"></div>
+        <div class="mt-2" id="account-explorer-missing" hidden></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="card shadow-sm" id="account-explorer-results-card">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h5 class="card-title mb-0">{{ t('account_explorer.results.title') }}</h5>
+          <span class="badge bg-secondary" id="account-explorer-record-count" hidden></span>
+        </div>
+        <p class="text-muted" id="account-explorer-results-placeholder">{{ t('account_explorer.results.placeholder') }}</p>
+        <div id="account-explorer-results" class="d-none">
+          <div class="row g-4">
+            <div class="col-lg-4">
+              <div class="list-group" id="account-explorer-account-list"></div>
+            </div>
+            <div class="col-lg-8">
+              <div id="account-explorer-account-details" class="d-none">
+                <h6 class="fw-semibold" id="account-explorer-account-heading"></h6>
+                <div class="mb-3">
+                  <h6 class="text-muted text-uppercase small">{{ t('account_explorer.results.fields_heading') }}</h6>
+                  <dl class="row" id="account-explorer-account-fields"></dl>
+                </div>
+                <div id="account-explorer-related"></div>
+              </div>
+              <div id="account-explorer-account-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.ACCOUNT_EXPLORER_OBJECTS = {{ account_explorer_objects | tojson }};
+  window.ACCOUNT_EXPLORER_CONFIG = {{ account_explorer_config | tojson }};
+  window.ACCOUNT_EXPLORER_RESULT = {{ account_explorer_result | tojson }};
+  window.ACCOUNT_EXPLORER_LIMIT = {{ account_explorer_limit | tojson }};
+</script>
+<script src="{{ url_for('static', filename='account-explorer.js') }}" defer></script>
+{% endblock %}

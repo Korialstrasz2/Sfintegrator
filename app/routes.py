@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import threading
-
-import json
+from pathlib import Path
+from typing import List
 
 from flask import (Blueprint, Response, current_app, jsonify, redirect,
-                   render_template, request, session, url_for)
+                   render_template, request, send_file, session, url_for)
 
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from . import data_import
+from . import account_explorer, data_import
 from .salesforce import (
     SalesforceError,
     build_authorize_url,
@@ -129,6 +130,23 @@ def guide() -> str:
     return render_template("guide.html")
 
 
+@main_bp.route("/account-explorer")
+def account_explorer_page() -> str:
+    session_state = account_explorer.get_session()
+    result = session_state.result.to_dict() if session_state.result else None
+    config = account_explorer.get_config()
+    language = session.get("language", DEFAULT_LANGUAGE)
+    page_title = translate("account_explorer.title", language)
+    return render_template(
+        "account_explorer.html",
+        account_explorer_objects=account_explorer.CONNECTED_OBJECTS,
+        account_explorer_config=config.to_dict(),
+        account_explorer_result=result,
+        account_explorer_limit=account_explorer.MAX_ACCOUNT_IDS,
+        title=page_title,
+    )
+
+
 @main_bp.route("/data-import")
 def data_import_page() -> str:
     import_session = data_import.get_import_session()
@@ -155,7 +173,14 @@ def settings() -> str:
         return redirect(url_for("main.settings", saved=1))
 
     saved = request.args.get("saved") == "1"
-    return render_template("settings.html", settings_saved=saved)
+    config = account_explorer.get_config()
+    return render_template(
+        "settings.html",
+        settings_saved=saved,
+        account_explorer_objects=account_explorer.list_objects(),
+        account_explorer_config=config.to_dict(),
+        account_explorer_limit=account_explorer.MAX_ACCOUNT_IDS,
+    )
 
 
 @main_bp.route("/api/data-import/status", methods=["GET"])
@@ -245,6 +270,139 @@ def api_data_import_related() -> Response:
         return jsonify({"error": "no_matches"}), 404
     graph = import_session.get_related_component(matches)
     return jsonify(graph)
+
+
+@main_bp.route("/api/account-explorer/config", methods=["GET"])
+def api_account_explorer_get_config() -> Response:
+    config = account_explorer.get_config()
+    objects = account_explorer.list_objects()
+    resolved = {definition["key"]: config.get_fields(definition["key"]) for definition in objects}
+    payload = {
+        "config": config.to_dict(),
+        "resolved": resolved,
+        "objects": objects,
+        "connectedObjects": account_explorer.CONNECTED_OBJECTS,
+        "limit": account_explorer.MAX_ACCOUNT_IDS,
+    }
+    return jsonify(payload)
+
+
+@main_bp.route("/api/account-explorer/config", methods=["POST"])
+def api_account_explorer_update_config() -> Response:
+    payload = request.get_json(force=True)
+    fields = payload.get("fields") if isinstance(payload, dict) else None
+    if not isinstance(fields, dict):
+        return jsonify({"error": "invalid_fields"}), 400
+    config = account_explorer.update_config(fields)
+    objects = account_explorer.list_objects()
+    resolved = {definition["key"]: config.get_fields(definition["key"]) for definition in objects}
+    return jsonify({
+        "config": config.to_dict(),
+        "resolved": resolved,
+        "objects": objects,
+        "limit": account_explorer.MAX_ACCOUNT_IDS,
+    })
+
+
+@main_bp.route("/api/account-explorer/parse", methods=["POST"])
+def api_account_explorer_parse() -> Response:
+    ids: List[str] = []
+    if request.content_type and "multipart/form-data" in request.content_type:
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return jsonify({"error": "missing_file"}), 400
+        file_bytes = file.read()
+        try:
+            ids = account_explorer.parse_account_ids_from_file(file.filename, file_bytes)
+        except ModuleNotFoundError:
+            return jsonify({"error": "invalid_file", "code": "missing_dependency"}), 400
+        except ValueError as exc:
+            code = exc.args[0] if exc.args else "invalid_file"
+            if not isinstance(code, str):
+                code = "invalid_file"
+            return jsonify({"error": "invalid_file", "code": code}), 400
+    else:
+        payload = request.get_json(force=True)
+        text = payload.get("text") if isinstance(payload, dict) else ""
+        ids = account_explorer.parse_account_ids_from_text(text or "")
+    return jsonify({"ids": ids, "count": len(ids), "limit": account_explorer.MAX_ACCOUNT_IDS})
+
+
+@main_bp.route("/api/account-explorer/run", methods=["POST"])
+def api_account_explorer_run() -> Response:
+    payload = request.get_json(force=True)
+    org_id = (payload.get("org_id") or "").strip() if isinstance(payload, dict) else ""
+    account_ids = payload.get("account_ids") if isinstance(payload, dict) else None
+    if not org_id or not isinstance(account_ids, list):
+        return jsonify({"error": "missing_parameters"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    try:
+        result = account_explorer.run_explorer(org, account_ids)
+    except ValueError as exc:
+        code = exc.args[0] if exc.args else "invalid_accounts"
+        if not isinstance(code, str):
+            code = "invalid_accounts"
+        return jsonify({"error": "invalid_accounts", "code": code}), 400
+    except SalesforceError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(result.to_dict())
+
+
+@main_bp.route("/api/account-explorer/result", methods=["GET"])
+def api_account_explorer_result() -> Response:
+    session_state = account_explorer.get_session()
+    result = session_state.result.to_dict() if session_state.result else None
+    return jsonify({"result": result})
+
+
+@main_bp.route("/api/account-explorer/download", methods=["GET"])
+def api_account_explorer_download():
+    session_state = account_explorer.get_session()
+    if not session_state.result or not session_state.result.file_path:
+        return jsonify({"error": "no_result"}), 404
+    file_path = Path(session_state.result.file_path)
+    if not file_path.exists():
+        return jsonify({"error": "file_missing"}), 404
+    return send_file(
+        file_path,
+        mimetype="application/json",
+        download_name=file_path.name,
+        as_attachment=True,
+    )
+
+
+@main_bp.route("/api/account-explorer/fields", methods=["GET"])
+def api_account_explorer_fields() -> Response:
+    org_id = (request.args.get("org_id") or "").strip()
+    object_name = (request.args.get("object") or "").strip()
+    term = (request.args.get("term") or "").strip().lower()
+    if not org_id or not object_name:
+        return jsonify({"error": "missing_parameters"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    try:
+        fields = account_explorer.describe_object(org, object_name)
+    except SalesforceError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if term:
+        filtered = [
+            field
+            for field in fields
+            if term in (field.get("name", "").lower())
+            or term in (field.get("label", "").lower())
+        ]
+    else:
+        filtered = fields
+    return jsonify({"fields": filtered})
 
 
 @main_bp.route("/api/orgs", methods=["GET"])

@@ -105,6 +105,17 @@ def query(org: OrgConfig, soql: str) -> Dict:
     return data
 
 
+def query_all(org: OrgConfig, soql: str) -> Dict[str, object]:
+    data, current_org = _authorized_get(org, "/services/data/v57.0/query", params={"q": soql})
+    records = list(data.get("records", []))
+    next_url = data.get("nextRecordsUrl")
+    while next_url:
+        data, current_org = _authorized_get(current_org, next_url)
+        records.extend(data.get("records", []))
+        next_url = data.get("nextRecordsUrl")
+    return {"records": records, "totalSize": len(records)}
+
+
 def list_sobjects(org: OrgConfig) -> List[Dict[str, str]]:
     data, _ = _authorized_get(org, "/services/data/v57.0/sobjects")
     sobjects = []
