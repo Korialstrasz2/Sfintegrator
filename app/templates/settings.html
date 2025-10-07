@@ -35,6 +35,57 @@
         </form>
       </div>
     </div>
+    <div class="card shadow-sm mt-4" id="account-explorer-settings">
+      <div class="card-body">
+        <h5 class="card-title">{{ t('settings.account_explorer.title') }}</h5>
+        <p class="text-muted small">{{ t('settings.account_explorer.description', limit=account_explorer_limit) }}</p>
+        <div class="mb-3">
+          <label class="form-label" for="account-explorer-settings-org">{{ t('settings.account_explorer.org_label') }}</label>
+          <select class="form-select" id="account-explorer-settings-org">
+            <option value="">{{ t('settings.account_explorer.org_placeholder') }}</option>
+          </select>
+          <div class="form-text">{{ t('settings.account_explorer.org_help') }}</div>
+        </div>
+        <div id="account-explorer-settings-objects">
+          {% for definition in account_explorer_objects %}
+            <div class="mb-4 account-explorer-settings-object" data-object="{{ definition.key }}">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">{{ definition.label }}</h6>
+                <small class="text-muted">{{ t('settings.account_explorer.field_help') }}</small>
+              </div>
+              <div class="row g-2">
+                {% for index in range(5) %}
+                  <div class="col-sm-6 col-lg-4">
+                    <input
+                      type="text"
+                      class="form-control account-explorer-field-input"
+                      data-object="{{ definition.key }}"
+                      data-index="{{ index }}"
+                      list="account-explorer-fields-{{ definition.key }}"
+                      placeholder="{{ t('settings.account_explorer.field_placeholder', index=index + 1) }}"
+                    />
+                  </div>
+                {% endfor %}
+              </div>
+              <datalist id="account-explorer-fields-{{ definition.key }}"></datalist>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary" type="button" id="account-explorer-settings-save">{{ t('settings.account_explorer.save_button') }}</button>
+          <button class="btn btn-outline-secondary" type="button" id="account-explorer-settings-reset">{{ t('settings.account_explorer.reset_button') }}</button>
+        </div>
+        <div class="mt-3" id="account-explorer-settings-status"></div>
+      </div>
+    </div>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+  {{ super() }}
+  <script>
+    window.ACCOUNT_EXPLORER_OBJECTS_ALL = {{ account_explorer_objects | tojson }};
+    window.ACCOUNT_EXPLORER_CONFIG = {{ account_explorer_config | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='settings.js') }}" defer></script>
 {% endblock %}
