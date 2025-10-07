@@ -11,6 +11,7 @@ from flask import (Blueprint, Response, current_app, jsonify, redirect,
 
 from itsdangerous import BadSignature, URLSafeSerializer
 
+from . import data_import
 from .salesforce import (
     SalesforceError,
     build_authorize_url,
@@ -128,6 +129,18 @@ def guide() -> str:
     return render_template("guide.html")
 
 
+@main_bp.route("/data-import")
+def data_import_page() -> str:
+    import_session = data_import.get_import_session()
+    status = import_session.get_status()
+    return render_template(
+        "data_import.html",
+        data_import_objects=data_import.DATA_IMPORT_OBJECTS,
+        data_import_status=status,
+        title="Data Import All Files",
+    )
+
+
 @main_bp.route("/settings", methods=["GET", "POST"])
 def settings() -> str:
     if request.method == "POST":
@@ -143,6 +156,95 @@ def settings() -> str:
 
     saved = request.args.get("saved") == "1"
     return render_template("settings.html", settings_saved=saved)
+
+
+@main_bp.route("/api/data-import/status", methods=["GET"])
+def api_data_import_status() -> Response:
+    import_session = data_import.get_import_session()
+    return jsonify(import_session.get_status())
+
+
+@main_bp.route("/api/data-import/upload", methods=["POST"])
+def api_data_import_upload() -> Response:
+    object_key = request.form.get("object")
+    if not object_key:
+        return jsonify({"error": "missing_object"}), 400
+    if not data_import.get_object_definition(object_key):
+        return jsonify({"error": "unknown_object"}), 400
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "missing_file"}), 400
+    file_bytes = file.read()
+    try:
+        dataset = data_import.parse_tabular_file(file.filename, file_bytes)
+    except ModuleNotFoundError:
+        return jsonify({"error": "invalid_file", "code": "missing_dependency"}), 400
+    except ValueError as exc:
+        error_code = exc.args[0] if exc.args else "invalid_file"
+        if not isinstance(error_code, str):
+            error_code = "invalid_file"
+        return jsonify({"error": "invalid_file", "code": error_code}), 400
+
+    import_session = data_import.get_import_session()
+    import_session.set_object_data(object_key, dataset)
+    return jsonify({"status": import_session.get_status(), "object": object_key})
+
+
+@main_bp.route("/api/data-import/upload", methods=["DELETE"])
+def api_data_import_remove() -> Response:
+    payload = request.get_json(silent=True) or {}
+    object_key = payload.get("object")
+    if not object_key:
+        return jsonify({"error": "missing_object"}), 400
+    if not data_import.get_object_definition(object_key):
+        return jsonify({"error": "unknown_object"}), 400
+    import_session = data_import.get_import_session()
+    import_session.clear_object_data(object_key)
+    return jsonify({"status": import_session.get_status(), "object": object_key})
+
+
+@main_bp.route("/api/data-import/fields", methods=["GET"])
+def api_data_import_fields() -> Response:
+    object_key = request.args.get("object", "")
+    if not object_key:
+        return jsonify({"error": "missing_object"}), 400
+    if not data_import.get_object_definition(object_key):
+        return jsonify({"error": "unknown_object"}), 400
+    import_session = data_import.get_import_session()
+    fields = import_session.get_fields(object_key)
+    return jsonify({"object": object_key, "fields": fields})
+
+
+@main_bp.route("/api/data-import/autocomplete", methods=["GET"])
+def api_data_import_autocomplete() -> Response:
+    object_key = request.args.get("object", "")
+    field_name = request.args.get("field", "")
+    term = request.args.get("term", "")
+    if not object_key or not field_name:
+        return jsonify({"error": "missing_parameters"}), 400
+    if not data_import.get_object_definition(object_key):
+        return jsonify({"error": "unknown_object"}), 400
+    import_session = data_import.get_import_session()
+    values = import_session.get_autocomplete_values(object_key, field_name, term)
+    return jsonify({"values": values})
+
+
+@main_bp.route("/api/data-import/related", methods=["POST"])
+def api_data_import_related() -> Response:
+    payload = request.get_json(force=True)
+    object_key = payload.get("object") if isinstance(payload, dict) else None
+    field_name = payload.get("field") if isinstance(payload, dict) else None
+    value = payload.get("value") if isinstance(payload, dict) else None
+    if not object_key or not field_name or value is None:
+        return jsonify({"error": "missing_parameters"}), 400
+    if not data_import.get_object_definition(object_key):
+        return jsonify({"error": "unknown_object"}), 400
+    import_session = data_import.get_import_session()
+    matches = import_session.search_records(object_key, field_name, str(value))
+    if not matches:
+        return jsonify({"error": "no_matches"}), 404
+    graph = import_session.get_related_component(matches)
+    return jsonify(graph)
 
 
 @main_bp.route("/api/orgs", methods=["GET"])
