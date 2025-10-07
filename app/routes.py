@@ -355,11 +355,11 @@ def api_list_sobject_fields(object_name: str) -> Response:
         return jsonify({"error": "Unknown org"}), 404
 
     try:
-        describe = describe_sobject(org, object_name)
+        fields = describe_sobject(org, object_name)
     except SalesforceError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify(describe)
+    return jsonify(fields)
 
 
 @main_bp.errorhandler(SalesforceError)
