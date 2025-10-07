@@ -18,6 +18,23 @@ const state = {
     records: [],
     queryFields: [],
   },
+  queryBuilder: {
+    step: 0,
+    template: "blank",
+    baseObject: "",
+    selectedFields: [],
+    fieldFilter: "",
+    useCount: false,
+    filters: [],
+    sorts: [],
+    limit: "",
+    childQueries: [],
+    counters: {
+      filter: 0,
+      sort: 0,
+      child: 0,
+    },
+  },
 };
 
 const STORAGE_PREFIX = "sfint";
@@ -27,6 +44,32 @@ const STORAGE_KEYS = {
   selectedOrg: `${STORAGE_PREFIX}.selectedOrg`,
   queryDraft: `${STORAGE_PREFIX}.queryDraft`,
 };
+
+const QUERY_COMPOSER_STEPS = ["templates", "fields", "filters", "review"];
+const QUERY_COMPOSER_OPERATOR_OPTIONS = [
+  { value: "=", key: "equals" },
+  { value: "!=", key: "not_equals" },
+  { value: ">", key: "greater" },
+  { value: ">=", key: "greater_or_equal" },
+  { value: "<", key: "less" },
+  { value: "<=", key: "less_or_equal" },
+  { value: "LIKE", key: "like" },
+  { value: "NOT LIKE", key: "not_like" },
+  { value: "IN", key: "in" },
+  { value: "NOT IN", key: "not_in" },
+  { value: "INCLUDES", key: "includes" },
+  { value: "EXCLUDES", key: "excludes" },
+];
+const QUERY_COMPOSER_LOGIC_OPTIONS = [
+  { value: "AND", key: "and" },
+  { value: "OR", key: "or" },
+];
+const QUERY_COMPOSER_DIRECTION_OPTIONS = [
+  { value: "ASC", key: "asc" },
+  { value: "DESC", key: "desc" },
+];
+
+let queryComposerModal = null;
 
 function getLocalStorage() {
   try {
@@ -1010,6 +1053,7 @@ function handleOrgSelection(orgId, label = "") {
       selectedOrgInput.value = "";
     }
     document.querySelectorAll(".org-select").forEach((btn) => btn.classList.remove("active"));
+    updateQueryComposerAvailability();
     return;
   }
 
@@ -1031,6 +1075,7 @@ function handleOrgSelection(orgId, label = "") {
     .forEach((btn) => btn.classList.toggle("active", btn.dataset.org === normalizedId));
   saveSelectedOrgToStorage(normalizedId, resolvedLabel);
   loadMetadataForSelectedOrg();
+  updateQueryComposerAvailability();
 }
 
 function bindOrgSelection() {
@@ -1725,6 +1770,7 @@ function renderObjectList(filterText = state.metadata.filter) {
   state.metadata.filter = filterText || "";
   list.innerHTML = "";
   if (!state.metadata.objects.length) {
+    updateComposerObjectOptions([]);
     showElement(empty, true);
     return;
   }
@@ -1735,6 +1781,8 @@ function renderObjectList(filterText = state.metadata.filter) {
     const labelMatch = item.label?.toLowerCase().includes(normalizedFilter);
     return nameMatch || labelMatch;
   });
+
+  updateComposerObjectOptions(objects.map((item) => item.name));
 
   if (!objects.length) {
     showElement(empty, true);
@@ -1843,10 +1891,13 @@ function renderFieldList(fields = null) {
   }
   list.innerHTML = "";
   if (!values.length) {
+    updateComposerFieldOptions([]);
     showElement(empty, true);
     return;
   }
   showElement(empty, false);
+
+  updateComposerFieldOptions(values);
 
   values
     .slice()
@@ -1886,6 +1937,7 @@ function renderFieldList(fields = null) {
     });
 
   updateFieldSuggestions();
+  renderQueryComposerAvailableFields();
 }
 
 function initializeAutocomplete() {
@@ -1898,6 +1950,1237 @@ function initializeAutocomplete() {
   }
   renderObjectList();
   renderFieldList([]);
+}
+
+function updateComposerObjectOptions(names = []) {
+  const datalist = document.getElementById("query-composer-object-options");
+  if (!datalist) return;
+  datalist.innerHTML = "";
+  names
+    .filter((name) => typeof name === "string" && name.trim())
+    .map((name) => name.trim())
+    .filter((value, index, self) => self.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      datalist.appendChild(option);
+    });
+}
+
+function updateComposerFieldOptions(fields = []) {
+  const datalist = document.getElementById("query-composer-field-options");
+  if (!datalist) return;
+  datalist.innerHTML = "";
+  const names = fields
+    .map((item) => (typeof item === "string" ? item : item?.name))
+    .filter((name) => typeof name === "string" && name.trim())
+    .map((name) => name.trim());
+  names
+    .filter((value, index, self) => self.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      datalist.appendChild(option);
+    });
+}
+
+function resetQueryComposerState() {
+  const builder = state.queryBuilder;
+  builder.step = 0;
+  builder.template = "blank";
+  builder.baseObject = builder.baseObject || state.metadata.selectedObject || "";
+  builder.selectedFields = [];
+  builder.fieldFilter = "";
+  builder.useCount = false;
+  builder.filters = [];
+  builder.sorts = [];
+  builder.limit = "";
+  builder.childQueries = [];
+  builder.counters = { filter: 0, sort: 0, child: 0 };
+}
+
+function createComposerFilter(overrides = {}) {
+  const builder = state.queryBuilder;
+  builder.counters.filter += 1;
+  return {
+    id: `filter-${builder.counters.filter}`,
+    field: "",
+    operator: "=",
+    value: "",
+    logic: "AND",
+    ...overrides,
+  };
+}
+
+function createComposerSort(overrides = {}) {
+  const builder = state.queryBuilder;
+  builder.counters.sort += 1;
+  return {
+    id: `sort-${builder.counters.sort}`,
+    field: "",
+    direction: "ASC",
+    ...overrides,
+  };
+}
+
+function createComposerChild(overrides = {}) {
+  const builder = state.queryBuilder;
+  builder.counters.child += 1;
+  return {
+    id: `child-${builder.counters.child}`,
+    relationship: "",
+    fields: "",
+    where: "",
+    order: "",
+    limit: "",
+    ...overrides,
+  };
+}
+
+const QUERY_COMPOSER_TEMPLATES = [
+  {
+    id: "blank",
+    labelKey: "composer.templates.blank.label",
+    descriptionKey: "composer.templates.blank.description",
+    apply(builder) {
+      builder.selectedFields = ["Id", "Name"];
+    },
+  },
+  {
+    id: "recent",
+    labelKey: "composer.templates.recent.label",
+    descriptionKey: "composer.templates.recent.description",
+    apply(builder) {
+      builder.selectedFields = ["Id", "Name"];
+      builder.sorts = [createComposerSort({ field: "CreatedDate", direction: "DESC" })];
+      builder.limit = "50";
+    },
+  },
+  {
+    id: "my_records",
+    labelKey: "composer.templates.my_records.label",
+    descriptionKey: "composer.templates.my_records.description",
+    apply(builder) {
+      builder.selectedFields = ["Id", "Name"];
+      builder.filters = [createComposerFilter({ field: "OwnerId", operator: "=", value: ":User.Id" })];
+    },
+  },
+  {
+    id: "with_children",
+    labelKey: "composer.templates.with_children.label",
+    descriptionKey: "composer.templates.with_children.description",
+    apply(builder) {
+      builder.selectedFields = ["Id", "Name"];
+      builder.childQueries = [
+        createComposerChild({
+          relationship: "Contacts",
+          fields: "Id, Name, Email",
+          limit: "100",
+        }),
+      ];
+    },
+  },
+];
+
+function getQueryComposerTemplate(templateId) {
+  return QUERY_COMPOSER_TEMPLATES.find((template) => template.id === templateId) || QUERY_COMPOSER_TEMPLATES[0];
+}
+
+function renderQueryComposerTemplates() {
+  const container = document.getElementById("query-composer-templates");
+  if (!container) return;
+  container.innerHTML = "";
+  const currentId = state.queryBuilder.template;
+  QUERY_COMPOSER_TEMPLATES.forEach((template) => {
+    const col = document.createElement("div");
+    col.className = "col";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-outline-secondary w-100 text-start h-100 query-composer-template";
+    if (template.id === currentId) {
+      button.classList.add("active");
+    }
+    const title = document.createElement("span");
+    title.className = "fw-semibold d-block";
+    title.textContent = translate(template.labelKey);
+    button.appendChild(title);
+    const description = document.createElement("span");
+    description.className = "small text-muted";
+    description.textContent = translate(template.descriptionKey);
+    button.appendChild(description);
+    button.addEventListener("click", () => {
+      setQueryComposerTemplate(template.id);
+    });
+    col.appendChild(button);
+    container.appendChild(col);
+  });
+}
+
+function setQueryComposerTemplate(templateId, options = {}) {
+  const builder = state.queryBuilder;
+  const template = getQueryComposerTemplate(templateId);
+  builder.template = template.id;
+  builder.selectedFields = [];
+  builder.filters = [];
+  builder.sorts = [];
+  builder.childQueries = [];
+  builder.limit = "";
+  builder.useCount = false;
+  builder.counters.filter = 0;
+  builder.counters.sort = 0;
+  builder.counters.child = 0;
+  template.apply(builder);
+  if (!options.silent) {
+    renderQueryComposerTemplates();
+    renderQueryComposerSelectedFields();
+    renderQueryComposerAvailableFields();
+    renderQueryComposerFilters();
+    renderQueryComposerSorts();
+    renderQueryComposerChildren();
+    renderQueryComposerReview();
+    updateQueryComposerPreview();
+    updateQueryComposerNavigation();
+  }
+}
+
+async function setQueryComposerBaseObject(objectName) {
+  const normalized = typeof objectName === "string" ? objectName.trim() : "";
+  state.queryBuilder.baseObject = normalized;
+  const input = document.getElementById("query-composer-base-object");
+  if (input && input.value !== normalized) {
+    input.value = normalized;
+  }
+  if (!normalized) {
+    renderQueryComposerAvailableFields();
+    updateQueryComposerPreview();
+    return;
+  }
+  if (state.metadata.selectedObject !== normalized) {
+    selectObject(normalized, { silent: true });
+  }
+  await loadFieldsForObject(normalized);
+  renderQueryComposerAvailableFields();
+  renderQueryComposerSelectedFields();
+  updateQueryComposerPreview();
+}
+
+function renderQueryComposerAvailableFields() {
+  const container = document.getElementById("query-composer-available-fields");
+  const empty = document.getElementById("query-composer-available-fields-empty");
+  if (!container || !empty) return;
+  const builder = state.queryBuilder;
+  const objectName = builder.baseObject;
+  const fields = objectName ? state.metadata.fields[objectName] || [] : [];
+  const filterText = (builder.fieldFilter || "").toLowerCase();
+  container.innerHTML = "";
+  if (!fields.length) {
+    empty.textContent = translate("composer.fields.available_empty");
+    showElement(empty, true);
+    return;
+  }
+  const filtered = fields.filter((field) => {
+    if (!filterText) return true;
+    const target = `${field.name} ${field.label || ""}`.toLowerCase();
+    return target.includes(filterText);
+  });
+  if (!filtered.length) {
+    empty.textContent = translate("composer.fields.filter_empty");
+    showElement(empty, true);
+    return;
+  }
+  showElement(empty, false);
+  const selectedSet = new Set(
+    builder.selectedFields.map((field) => normalizeFieldName(field))
+  );
+  filtered
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+    .forEach((field) => {
+      const item = document.createElement("div");
+      item.className = "query-composer-field-item";
+      if (selectedSet.has(normalizeFieldName(field.name))) {
+        item.classList.add("active");
+      }
+      const textContainer = document.createElement("div");
+      textContainer.className = "d-flex flex-column";
+      const nameEl = document.createElement("span");
+      nameEl.className = "fw-semibold";
+      nameEl.textContent = field.name;
+      textContainer.appendChild(nameEl);
+      if (field.label && field.label !== field.name) {
+        const labelEl = document.createElement("span");
+        labelEl.className = "small text-muted";
+        labelEl.textContent = field.label;
+        textContainer.appendChild(labelEl);
+      }
+      item.appendChild(textContainer);
+      if (field.type) {
+        const badge = document.createElement("span");
+        badge.className = "badge bg-light text-dark";
+        badge.textContent = field.type;
+        item.appendChild(badge);
+      }
+      item.addEventListener("click", () => addFieldToComposer(field.name));
+      container.appendChild(item);
+    });
+}
+
+function renderQueryComposerSelectedFields() {
+  const container = document.getElementById("query-composer-selected-fields");
+  const empty = document.getElementById("query-composer-selected-fields-empty");
+  if (!container || !empty) return;
+  const toggle = document.getElementById("query-composer-use-count");
+  if (toggle) {
+    toggle.checked = state.queryBuilder.useCount;
+  }
+  container.innerHTML = "";
+  const fields = state.queryBuilder.selectedFields;
+  if (!fields.length) {
+    empty.textContent = translate("composer.fields.selected_empty");
+    showElement(empty, true);
+    return;
+  }
+  showElement(empty, false);
+  fields.forEach((field, index) => {
+    const chip = document.createElement("span");
+    chip.className = "query-composer-chip";
+    chip.textContent = field;
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.setAttribute("aria-label", translate("composer.filters.remove"));
+    removeButton.innerHTML = "&times;";
+    removeButton.addEventListener("click", () => removeFieldFromComposer(index));
+    chip.appendChild(removeButton);
+    container.appendChild(chip);
+  });
+}
+
+function addFieldToComposer(field) {
+  const value = typeof field === "string" ? field.trim() : "";
+  if (!value) return;
+  const normalized = normalizeFieldName(value);
+  const exists = state.queryBuilder.selectedFields.some(
+    (item) => normalizeFieldName(item) === normalized
+  );
+  if (exists) {
+    showToast(translate("composer.messages.field_exists", { field: value }), "info");
+    return;
+  }
+  state.queryBuilder.selectedFields.push(value);
+  renderQueryComposerSelectedFields();
+  renderQueryComposerAvailableFields();
+  updateQueryComposerPreview();
+  renderQueryComposerReview();
+  updateQueryComposerNavigation();
+}
+
+function removeFieldFromComposer(index) {
+  if (index < 0 || index >= state.queryBuilder.selectedFields.length) {
+    return;
+  }
+  state.queryBuilder.selectedFields.splice(index, 1);
+  renderQueryComposerSelectedFields();
+  renderQueryComposerAvailableFields();
+  updateQueryComposerPreview();
+  renderQueryComposerReview();
+  updateQueryComposerNavigation();
+}
+
+function addComposerFilter(overrides = {}) {
+  state.queryBuilder.filters.push(createComposerFilter(overrides));
+  renderQueryComposerFilters();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function removeComposerFilter(id) {
+  state.queryBuilder.filters = state.queryBuilder.filters.filter((filter) => filter.id !== id);
+  renderQueryComposerFilters();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function renderQueryComposerFilters() {
+  const container = document.getElementById("query-composer-filters");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!state.queryBuilder.filters.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("composer.review.empty");
+    container.appendChild(empty);
+    return;
+  }
+  state.queryBuilder.filters.forEach((filter, index) => {
+    const card = document.createElement("div");
+    card.className = "composer-card";
+    card.dataset.id = filter.id;
+
+    const row = document.createElement("div");
+    row.className = "row g-2 align-items-end";
+
+    const logicCol = document.createElement("div");
+    logicCol.className = "col-12 col-md-3 col-lg-2";
+    const logicLabel = document.createElement("label");
+    logicLabel.className = "form-label small";
+    logicLabel.textContent = translate("composer.filters.logic_label");
+    logicCol.appendChild(logicLabel);
+    const logicSelect = document.createElement("select");
+    logicSelect.className = "form-select form-select-sm";
+    logicSelect.disabled = index === 0;
+    QUERY_COMPOSER_LOGIC_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = translate(`composer.filters.logic.${option.key}`);
+      logicSelect.appendChild(opt);
+    });
+    logicSelect.value = filter.logic || "AND";
+    logicSelect.addEventListener("change", (event) => {
+      filter.logic = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    logicCol.appendChild(logicSelect);
+    row.appendChild(logicCol);
+
+    const fieldCol = document.createElement("div");
+    fieldCol.className = "col-12 col-md-4 col-lg-3";
+    const fieldLabel = document.createElement("label");
+    fieldLabel.className = "form-label small";
+    fieldLabel.textContent = translate("composer.filters.field_placeholder");
+    fieldCol.appendChild(fieldLabel);
+    const fieldInput = document.createElement("input");
+    fieldInput.className = "form-control form-control-sm";
+    fieldInput.type = "text";
+    fieldInput.placeholder = translate("composer.filters.field_placeholder");
+    fieldInput.list = "query-composer-field-options";
+    fieldInput.value = filter.field || "";
+    fieldInput.addEventListener("input", (event) => {
+      filter.field = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    fieldCol.appendChild(fieldInput);
+    row.appendChild(fieldCol);
+
+    const operatorCol = document.createElement("div");
+    operatorCol.className = "col-6 col-md-3 col-lg-2";
+    const operatorLabel = document.createElement("label");
+    operatorLabel.className = "form-label small";
+    operatorLabel.textContent = translate("composer.filters.operator_label");
+    operatorCol.appendChild(operatorLabel);
+    const operatorSelect = document.createElement("select");
+    operatorSelect.className = "form-select form-select-sm";
+    QUERY_COMPOSER_OPERATOR_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = translate(`composer.filters.operators.${option.key}`);
+      operatorSelect.appendChild(opt);
+    });
+    operatorSelect.value = filter.operator || "=";
+    operatorSelect.addEventListener("change", (event) => {
+      filter.operator = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    operatorCol.appendChild(operatorSelect);
+    row.appendChild(operatorCol);
+
+    const valueCol = document.createElement("div");
+    valueCol.className = "col-6 col-md-3 col-lg-3";
+    const valueLabel = document.createElement("label");
+    valueLabel.className = "form-label small";
+    valueLabel.textContent = translate("composer.filters.value_placeholder");
+    valueCol.appendChild(valueLabel);
+    const valueInput = document.createElement("input");
+    valueInput.className = "form-control form-control-sm";
+    valueInput.type = "text";
+    valueInput.placeholder = translate("composer.filters.value_placeholder");
+    valueInput.value = filter.value || "";
+    valueInput.addEventListener("input", (event) => {
+      filter.value = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    valueCol.appendChild(valueInput);
+    row.appendChild(valueCol);
+
+    const removeCol = document.createElement("div");
+    removeCol.className = "col-12 col-lg-2 text-lg-end";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-link text-danger p-0 small";
+    removeBtn.textContent = translate("composer.filters.remove");
+    removeBtn.addEventListener("click", () => removeComposerFilter(filter.id));
+    removeCol.appendChild(removeBtn);
+    row.appendChild(removeCol);
+
+    card.appendChild(row);
+    container.appendChild(card);
+  });
+}
+
+function addComposerSort(overrides = {}) {
+  state.queryBuilder.sorts.push(createComposerSort(overrides));
+  renderQueryComposerSorts();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function removeComposerSort(id) {
+  state.queryBuilder.sorts = state.queryBuilder.sorts.filter((sort) => sort.id !== id);
+  renderQueryComposerSorts();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function renderQueryComposerSorts() {
+  const container = document.getElementById("query-composer-sorts");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!state.queryBuilder.sorts.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("composer.review.empty");
+    container.appendChild(empty);
+    return;
+  }
+  state.queryBuilder.sorts.forEach((sort) => {
+    const card = document.createElement("div");
+    card.className = "composer-card";
+    card.dataset.id = sort.id;
+
+    const row = document.createElement("div");
+    row.className = "row g-2 align-items-end";
+
+    const fieldCol = document.createElement("div");
+    fieldCol.className = "col-12 col-md-6";
+    const fieldLabel = document.createElement("label");
+    fieldLabel.className = "form-label small";
+    fieldLabel.textContent = translate("composer.sorting.field_placeholder");
+    fieldCol.appendChild(fieldLabel);
+    const fieldInput = document.createElement("input");
+    fieldInput.className = "form-control form-control-sm";
+    fieldInput.type = "text";
+    fieldInput.placeholder = translate("composer.sorting.field_placeholder");
+    fieldInput.list = "query-composer-field-options";
+    fieldInput.value = sort.field || "";
+    fieldInput.addEventListener("input", (event) => {
+      sort.field = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    fieldCol.appendChild(fieldInput);
+    row.appendChild(fieldCol);
+
+    const directionCol = document.createElement("div");
+    directionCol.className = "col-6 col-md-3";
+    const directionLabel = document.createElement("label");
+    directionLabel.className = "form-label small";
+    directionLabel.textContent = translate("composer.sorting.direction_label");
+    directionCol.appendChild(directionLabel);
+    const directionSelect = document.createElement("select");
+    directionSelect.className = "form-select form-select-sm";
+    QUERY_COMPOSER_DIRECTION_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = translate(`composer.sorting.directions.${option.key}`);
+      directionSelect.appendChild(opt);
+    });
+    directionSelect.value = sort.direction || "ASC";
+    directionSelect.addEventListener("change", (event) => {
+      sort.direction = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    directionCol.appendChild(directionSelect);
+    row.appendChild(directionCol);
+
+    const removeCol = document.createElement("div");
+    removeCol.className = "col-6 col-md-3 text-md-end";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-link text-danger p-0 small";
+    removeBtn.textContent = translate("composer.sorting.remove");
+    removeBtn.addEventListener("click", () => removeComposerSort(sort.id));
+    removeCol.appendChild(removeBtn);
+    row.appendChild(removeCol);
+
+    card.appendChild(row);
+    container.appendChild(card);
+  });
+}
+
+function addComposerChild(overrides = {}) {
+  state.queryBuilder.childQueries.push(createComposerChild(overrides));
+  renderQueryComposerChildren();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function removeComposerChild(id) {
+  state.queryBuilder.childQueries = state.queryBuilder.childQueries.filter((child) => child.id !== id);
+  renderQueryComposerChildren();
+  renderQueryComposerReview();
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+}
+
+function renderQueryComposerChildren() {
+  const container = document.getElementById("query-composer-children");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!state.queryBuilder.childQueries.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("composer.review.empty");
+    container.appendChild(empty);
+    return;
+  }
+  state.queryBuilder.childQueries.forEach((child) => {
+    const card = document.createElement("div");
+    card.className = "composer-card";
+    card.dataset.id = child.id;
+
+    const row = document.createElement("div");
+    row.className = "row g-2";
+
+    const relationshipCol = document.createElement("div");
+    relationshipCol.className = "col-12 col-md-4";
+    const relationshipLabel = document.createElement("label");
+    relationshipLabel.className = "form-label small";
+    relationshipLabel.textContent = translate("composer.child_queries.relationship_label");
+    relationshipCol.appendChild(relationshipLabel);
+    const relationshipInput = document.createElement("input");
+    relationshipInput.className = "form-control form-control-sm";
+    relationshipInput.type = "text";
+    relationshipInput.placeholder = translate("composer.child_queries.relationship_placeholder");
+    relationshipInput.value = child.relationship || "";
+    relationshipInput.addEventListener("input", (event) => {
+      child.relationship = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    relationshipCol.appendChild(relationshipInput);
+    row.appendChild(relationshipCol);
+
+    const fieldsCol = document.createElement("div");
+    fieldsCol.className = "col-12 col-md-8";
+    const fieldsLabel = document.createElement("label");
+    fieldsLabel.className = "form-label small";
+    fieldsLabel.textContent = translate("composer.child_queries.fields_label");
+    fieldsCol.appendChild(fieldsLabel);
+    const fieldsInput = document.createElement("input");
+    fieldsInput.className = "form-control form-control-sm";
+    fieldsInput.type = "text";
+    fieldsInput.placeholder = translate("composer.child_queries.fields_placeholder");
+    fieldsInput.list = "query-composer-field-options";
+    fieldsInput.value = child.fields || "";
+    fieldsInput.addEventListener("input", (event) => {
+      child.fields = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    fieldsCol.appendChild(fieldsInput);
+    row.appendChild(fieldsCol);
+
+    const whereCol = document.createElement("div");
+    whereCol.className = "col-12 col-md-6";
+    const whereLabel = document.createElement("label");
+    whereLabel.className = "form-label small";
+    whereLabel.textContent = translate("composer.child_queries.where_label");
+    whereCol.appendChild(whereLabel);
+    const whereInput = document.createElement("input");
+    whereInput.className = "form-control form-control-sm";
+    whereInput.type = "text";
+    whereInput.placeholder = translate("composer.child_queries.where_placeholder");
+    whereInput.value = child.where || "";
+    whereInput.addEventListener("input", (event) => {
+      child.where = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    whereCol.appendChild(whereInput);
+    row.appendChild(whereCol);
+
+    const orderCol = document.createElement("div");
+    orderCol.className = "col-12 col-md-4";
+    const orderLabel = document.createElement("label");
+    orderLabel.className = "form-label small";
+    orderLabel.textContent = translate("composer.child_queries.order_label");
+    orderCol.appendChild(orderLabel);
+    const orderInput = document.createElement("input");
+    orderInput.className = "form-control form-control-sm";
+    orderInput.type = "text";
+    orderInput.placeholder = translate("composer.child_queries.order_placeholder");
+    orderInput.value = child.order || "";
+    orderInput.addEventListener("input", (event) => {
+      child.order = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    orderCol.appendChild(orderInput);
+    row.appendChild(orderCol);
+
+    const limitCol = document.createElement("div");
+    limitCol.className = "col-12 col-md-2";
+    const limitLabel = document.createElement("label");
+    limitLabel.className = "form-label small";
+    limitLabel.textContent = translate("composer.child_queries.limit_label");
+    limitCol.appendChild(limitLabel);
+    const limitInput = document.createElement("input");
+    limitInput.className = "form-control form-control-sm";
+    limitInput.type = "number";
+    limitInput.min = "1";
+    limitInput.placeholder = translate("composer.child_queries.limit_placeholder");
+    limitInput.value = child.limit || "";
+    limitInput.addEventListener("input", (event) => {
+      child.limit = event.target.value;
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+    limitCol.appendChild(limitInput);
+    row.appendChild(limitCol);
+
+    const removeCol = document.createElement("div");
+    removeCol.className = "col-12 text-end";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-link text-danger p-0 small";
+    removeBtn.textContent = translate("composer.child_queries.remove");
+    removeBtn.addEventListener("click", () => removeComposerChild(child.id));
+    removeCol.appendChild(removeBtn);
+    row.appendChild(removeCol);
+
+    card.appendChild(row);
+    container.appendChild(card);
+  });
+}
+
+function renderQueryComposerReview() {
+  const container = document.getElementById("query-composer-review");
+  if (!container) return;
+  container.innerHTML = "";
+  const builder = state.queryBuilder;
+  const reviewItems = [
+    {
+      label: translate("composer.review.object"),
+      values: builder.baseObject ? [builder.baseObject] : [],
+    },
+    {
+      label: translate("composer.review.fields"),
+      values: builder.useCount ? ["COUNT()"] : builder.selectedFields.slice(),
+    },
+    {
+      label: translate("composer.review.filters"),
+      values: builder.filters
+        .filter((filter) => filter.field && filter.operator)
+        .map((filter, index) => {
+          const logic = index === 0 ? "" : `${filter.logic || "AND"} `;
+          const value = filter.value ? ` ${filter.value}` : "";
+          return `${logic}${filter.field} ${filter.operator}${value}`.trim();
+        }),
+    },
+    {
+      label: translate("composer.review.sorting"),
+      values: builder.sorts
+        .filter((sort) => sort.field)
+        .map((sort) => `${sort.field} ${sort.direction || "ASC"}`.trim()),
+    },
+    {
+      label: translate("composer.review.limit"),
+      values: builder.limit ? [builder.limit] : [],
+    },
+    {
+      label: translate("composer.review.child_queries"),
+      values: builder.childQueries
+        .filter((child) => child.relationship)
+        .map((child) => {
+          const parts = [child.relationship];
+          if (child.fields) {
+            parts.push(`(${child.fields})`);
+          }
+          const extras = [];
+          if (child.where) extras.push(`WHERE ${child.where}`);
+          if (child.order) extras.push(`ORDER BY ${child.order}`);
+          if (child.limit) extras.push(`LIMIT ${child.limit}`);
+          if (extras.length) {
+            parts.push(extras.join(" "));
+          }
+          return parts.join(" ");
+        }),
+    },
+  ];
+
+  reviewItems.forEach((item) => {
+    const col = document.createElement("div");
+    col.className = "col-12 col-md-6";
+    const card = document.createElement("div");
+    card.className = "composer-card";
+    const title = document.createElement("h6");
+    title.className = "mb-2";
+    title.textContent = item.label;
+    card.appendChild(title);
+    if (!item.values.length) {
+      const empty = document.createElement("p");
+      empty.className = "text-muted small mb-0";
+      empty.textContent = translate("composer.review.empty");
+      card.appendChild(empty);
+    } else {
+      const list = document.createElement("ul");
+      list.className = "list-unstyled small mb-0";
+      item.values.forEach((value) => {
+        const li = document.createElement("li");
+        li.textContent = value;
+        list.appendChild(li);
+      });
+      card.appendChild(list);
+    }
+    col.appendChild(card);
+    container.appendChild(col);
+  });
+}
+
+function buildComposerChildQuery(child) {
+  const relationship = (child.relationship || "").trim();
+  if (!relationship) {
+    return null;
+  }
+  const fields = (child.fields || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const parts = [];
+  parts.push(`SELECT ${fields.length ? fields.join(", ") : "Id"}`);
+  parts.push(`FROM ${relationship}`);
+  if (child.where && child.where.trim()) {
+    parts.push(`WHERE ${child.where.trim()}`);
+  }
+  if (child.order && child.order.trim()) {
+    parts.push(`ORDER BY ${child.order.trim()}`);
+  }
+  if (child.limit && child.limit.trim()) {
+    parts.push(`LIMIT ${child.limit.trim()}`);
+  }
+  return `(${parts.join(" ")})`;
+}
+
+function buildQueryFromComposer() {
+  const builder = state.queryBuilder;
+  const baseObject = (builder.baseObject || "").trim();
+  if (!baseObject) {
+    return "";
+  }
+  const lines = [];
+  if (builder.useCount) {
+    lines.push("SELECT COUNT()");
+  } else {
+    const selectParts = builder.selectedFields.slice();
+    builder.childQueries.forEach((child) => {
+      const fragment = buildComposerChildQuery(child);
+      if (fragment) {
+        selectParts.push(fragment);
+      }
+    });
+    if (!selectParts.length) {
+      selectParts.push("Id");
+    }
+    lines.push(`SELECT ${selectParts.join(", ")}`);
+  }
+  lines.push(`FROM ${baseObject}`);
+
+  const filters = builder.filters.filter((filter) => filter.field && filter.operator);
+  if (filters.length) {
+    filters.forEach((filter, index) => {
+      const value = filter.value ? ` ${filter.value}` : "";
+      if (index === 0) {
+        lines.push(`WHERE ${filter.field} ${filter.operator}${value}`.trim());
+      } else {
+        const logic = filter.logic || "AND";
+        lines.push(`  ${logic} ${filter.field} ${filter.operator}${value}`.trim());
+      }
+    });
+  }
+
+  const sorts = builder.sorts.filter((sort) => sort.field);
+  if (sorts.length) {
+    const orderParts = sorts.map((sort) => `${sort.field} ${sort.direction || "ASC"}`.trim());
+    lines.push(`ORDER BY ${orderParts.join(", ")}`);
+  }
+
+  if (builder.limit && builder.limit.trim()) {
+    lines.push(`LIMIT ${builder.limit.trim()}`);
+  }
+
+  return lines.join("\n");
+}
+
+function updateQueryComposerPreview() {
+  const previewElement = document.getElementById("query-composer-preview");
+  const copyButton = document.getElementById("query-composer-copy");
+  if (!previewElement) return;
+  const query = buildQueryFromComposer();
+  previewElement.textContent = query || "";
+  if (copyButton) {
+    copyButton.disabled = !query;
+  }
+}
+
+function canProceedFromComposerStep(step, options = {}) {
+  const showFeedback = options?.showFeedback ?? false;
+  if (step === 0) {
+    if (!state.queryBuilder.baseObject) {
+      if (showFeedback) {
+        showToast(translate("composer.messages.base_object_required"), "warning");
+      }
+      return false;
+    }
+  } else if (step === 1) {
+    if (!state.queryBuilder.useCount && !state.queryBuilder.selectedFields.length) {
+      if (showFeedback) {
+        showToast(translate("composer.messages.fields_required"), "warning");
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+function updateQueryComposerStepIndicator() {
+  const step = state.queryBuilder.step;
+  document.querySelectorAll(".query-composer-step").forEach((section) => {
+    const sectionStep = Number(section.dataset.step);
+    section.classList.toggle("active", sectionStep === step);
+  });
+  document.querySelectorAll("#query-composer-stepper .query-composer-step-button").forEach((button) => {
+    const buttonStep = Number(button.dataset.step);
+    button.classList.toggle("active", buttonStep === step);
+    button.disabled = buttonStep > step + 1;
+  });
+}
+
+function updateQueryComposerNavigation() {
+  const step = state.queryBuilder.step;
+  const lastStep = QUERY_COMPOSER_STEPS.length - 1;
+  const backButton = document.getElementById("query-composer-back");
+  const nextButton = document.getElementById("query-composer-next");
+  const finishButton = document.getElementById("query-composer-finish");
+  if (backButton) {
+    backButton.disabled = step === 0;
+  }
+  const canProceed = canProceedFromComposerStep(step, { showFeedback: false });
+  if (nextButton) {
+    nextButton.classList.toggle("d-none", step === lastStep);
+    nextButton.disabled = step === lastStep || !canProceed;
+  }
+  if (finishButton) {
+    finishButton.classList.toggle("d-none", step !== lastStep);
+    finishButton.disabled = step !== lastStep || !canProceedFromComposerStep(step, { showFeedback: false });
+  }
+}
+
+function handleQueryComposerBack() {
+  if (state.queryBuilder.step === 0) {
+    return;
+  }
+  state.queryBuilder.step -= 1;
+  updateQueryComposerStepIndicator();
+  updateQueryComposerNavigation();
+}
+
+function handleQueryComposerNext() {
+  if (!canProceedFromComposerStep(state.queryBuilder.step, { showFeedback: true })) {
+    return;
+  }
+  if (state.queryBuilder.step < QUERY_COMPOSER_STEPS.length - 1) {
+    state.queryBuilder.step += 1;
+    updateQueryComposerStepIndicator();
+    updateQueryComposerNavigation();
+  }
+}
+
+function handleQueryComposerFinish() {
+  if (!canProceedFromComposerStep(state.queryBuilder.step, { showFeedback: true })) {
+    return;
+  }
+  const query = buildQueryFromComposer();
+  if (!query) {
+    showToast(translate("composer.messages.base_object_required"), "warning");
+    return;
+  }
+  const textarea = document.getElementById("soql-query");
+  if (textarea) {
+    textarea.value = query;
+    applyKeywordFormatting(textarea, { preserveCursor: true });
+    refreshQueryEditorState();
+  }
+  showToast(translate("composer.messages.insert_success"), "success");
+  if (queryComposerModal) {
+    queryComposerModal.hide();
+  }
+}
+
+function hydrateQueryComposerFromEditor() {
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+  const rawQuery = textarea.value || "";
+  if (!rawQuery.trim()) {
+    return;
+  }
+  const builder = state.queryBuilder;
+  const objectName = extractObjectNameFromQuery(rawQuery);
+  if (objectName) {
+    builder.baseObject = objectName;
+  }
+  const fields = getSelectFields(rawQuery);
+  if (fields.length) {
+    const hasCount = fields.some((field) => /^count\s*\(/i.test(field));
+    if (hasCount) {
+      builder.useCount = true;
+      builder.selectedFields = [];
+    } else {
+      const topLevelFields = fields.filter((field) => !field.trim().startsWith("("));
+      if (topLevelFields.length) {
+        builder.selectedFields = topLevelFields;
+      }
+    }
+  }
+  const limitMatch = rawQuery.match(/\bLIMIT\s+(\d+)/i);
+  if (limitMatch) {
+    builder.limit = limitMatch[1];
+  }
+  const orderMatch = rawQuery.match(/\bORDER\s+BY\s+([^\n]+?)(?:\bLIMIT\b|$)/i);
+  if (orderMatch) {
+    const parts = orderMatch[1]
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    builder.sorts = parts.map((part) => {
+      const [field, direction] = part.split(/\s+/);
+      return createComposerSort({ field, direction: direction?.toUpperCase() === "DESC" ? "DESC" : "ASC" });
+    });
+  }
+}
+
+function copyQueryComposerPreview() {
+  const query = buildQueryFromComposer();
+  if (!query) {
+    showToast(translate("composer.messages.base_object_required"), "warning");
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(query)
+      .then(() => showToast(translate("composer.messages.copy_success"), "success"))
+      .catch(() => fallbackCopyComposerQuery(query));
+    return;
+  }
+  fallbackCopyComposerQuery(query);
+}
+
+function fallbackCopyComposerQuery(text) {
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "absolute";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+    showToast(translate("composer.messages.copy_success"), "success");
+  } catch (error) {
+    showToast(translate("composer.messages.copy_failed"), "danger");
+  }
+}
+
+function updateQueryComposerAvailability() {
+  const openButton = document.getElementById("query-composer-open");
+  if (!openButton) return;
+  openButton.disabled = !state.selectedOrg;
+}
+
+async function openQueryComposer() {
+  resetQueryComposerState();
+  setQueryComposerTemplate(state.queryBuilder.template || "blank", { silent: true });
+  hydrateQueryComposerFromEditor();
+  renderQueryComposerTemplates();
+  renderQueryComposerSelectedFields();
+  renderQueryComposerFilters();
+  renderQueryComposerSorts();
+  renderQueryComposerChildren();
+  renderQueryComposerReview();
+  updateQueryComposerStepIndicator();
+  updateQueryComposerNavigation();
+  if (state.queryBuilder.baseObject) {
+    await setQueryComposerBaseObject(state.queryBuilder.baseObject);
+  } else {
+    renderQueryComposerAvailableFields();
+    updateQueryComposerPreview();
+  }
+  const modalElement = document.getElementById("query-composer-modal");
+  if (modalElement && !queryComposerModal) {
+    queryComposerModal = new bootstrap.Modal(modalElement, { focus: true });
+  }
+  updateQueryComposerPreview();
+  updateQueryComposerNavigation();
+  const limitInput = document.getElementById("query-composer-limit");
+  if (limitInput) {
+    limitInput.value = state.queryBuilder.limit || "";
+  }
+  if (queryComposerModal) {
+    queryComposerModal.show();
+  }
+}
+
+function initializeQueryComposer() {
+  const openButton = document.getElementById("query-composer-open");
+  const modalElement = document.getElementById("query-composer-modal");
+  if (!openButton || !modalElement) {
+    return;
+  }
+
+  queryComposerModal = new bootstrap.Modal(modalElement, { focus: true });
+
+  openButton.addEventListener("click", () => {
+    openQueryComposer();
+  });
+
+  modalElement.addEventListener("hidden.bs.modal", () => {
+    state.queryBuilder.step = 0;
+    updateQueryComposerStepIndicator();
+    updateQueryComposerNavigation();
+  });
+
+  const stepper = document.getElementById("query-composer-stepper");
+  if (stepper) {
+    stepper.addEventListener("click", (event) => {
+      const button = event.target.closest(".query-composer-step-button");
+      if (!button) return;
+      const targetStep = Number(button.dataset.step);
+      if (Number.isNaN(targetStep) || targetStep === state.queryBuilder.step) {
+        return;
+      }
+      if (targetStep < state.queryBuilder.step) {
+        state.queryBuilder.step = targetStep;
+        updateQueryComposerStepIndicator();
+        updateQueryComposerNavigation();
+      } else {
+        if (!canProceedFromComposerStep(state.queryBuilder.step, { showFeedback: true })) {
+          return;
+        }
+        state.queryBuilder.step = Math.min(targetStep, QUERY_COMPOSER_STEPS.length - 1);
+        updateQueryComposerStepIndicator();
+        updateQueryComposerNavigation();
+      }
+    });
+  }
+
+  const baseObjectInput = document.getElementById("query-composer-base-object");
+  if (baseObjectInput) {
+    baseObjectInput.addEventListener("change", (event) => {
+      setQueryComposerBaseObject(event.target.value);
+    });
+    baseObjectInput.addEventListener("blur", (event) => {
+      if (event.target.value !== state.queryBuilder.baseObject) {
+        setQueryComposerBaseObject(event.target.value);
+      }
+    });
+  }
+
+  const fieldFilterInput = document.getElementById("query-composer-field-filter");
+  if (fieldFilterInput) {
+    fieldFilterInput.addEventListener("input", (event) => {
+      state.queryBuilder.fieldFilter = event.target.value || "";
+      renderQueryComposerAvailableFields();
+    });
+  }
+
+  const useCountToggle = document.getElementById("query-composer-use-count");
+  if (useCountToggle) {
+    useCountToggle.addEventListener("change", (event) => {
+      state.queryBuilder.useCount = event.target.checked;
+      renderQueryComposerSelectedFields();
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+      updateQueryComposerNavigation();
+    });
+  }
+
+  const customFieldInput = document.getElementById("query-composer-custom-field");
+  const customFieldButton = document.getElementById("query-composer-add-custom-field");
+  if (customFieldInput) {
+    customFieldInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addFieldToComposer(customFieldInput.value);
+        customFieldInput.value = "";
+      }
+    });
+  }
+  if (customFieldButton) {
+    customFieldButton.addEventListener("click", () => {
+      if (!customFieldInput) return;
+      addFieldToComposer(customFieldInput.value);
+      customFieldInput.value = "";
+    });
+  }
+
+  const addFilterButton = document.getElementById("query-composer-add-filter");
+  if (addFilterButton) {
+    addFilterButton.addEventListener("click", () => addComposerFilter());
+  }
+
+  const addSortButton = document.getElementById("query-composer-add-sort");
+  if (addSortButton) {
+    addSortButton.addEventListener("click", () => addComposerSort());
+  }
+
+  const addChildButton = document.getElementById("query-composer-add-child");
+  if (addChildButton) {
+    addChildButton.addEventListener("click", () => addComposerChild());
+  }
+
+  const limitInput = document.getElementById("query-composer-limit");
+  if (limitInput) {
+    limitInput.addEventListener("input", (event) => {
+      state.queryBuilder.limit = event.target.value || "";
+      renderQueryComposerReview();
+      updateQueryComposerPreview();
+    });
+  }
+
+  const backButton = document.getElementById("query-composer-back");
+  if (backButton) {
+    backButton.addEventListener("click", handleQueryComposerBack);
+  }
+
+  const nextButton = document.getElementById("query-composer-next");
+  if (nextButton) {
+    nextButton.addEventListener("click", handleQueryComposerNext);
+  }
+
+  const finishButton = document.getElementById("query-composer-finish");
+  if (finishButton) {
+    finishButton.addEventListener("click", handleQueryComposerFinish);
+  }
+
+  const copyButton = document.getElementById("query-composer-copy");
+  if (copyButton) {
+    copyButton.addEventListener("click", copyQueryComposerPreview);
+  }
+
+  updateQueryComposerStepIndicator();
+  updateQueryComposerNavigation();
+  updateQueryComposerAvailability();
 }
 
 function updateCustomEnvironmentVisibility(selectElement) {
@@ -2042,6 +3325,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeSavedQueries();
   initializeQueryHistory();
   initializeAutocomplete();
+  initializeQueryComposer();
   if (!state.selectedOrg) {
     loadMetadataForSelectedOrg();
   }
