@@ -84,13 +84,15 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     },
     "ContactPointPhone": {
         "label": "Contact Point Phone",
-        "required_fields": ["ContactId", "IndividualId"],
-        "filter_field": "ContactId",
+        "required_fields": ["Contact__c"],
+        "contact_field": "Contact__c",
+        "individual_field": None,
     },
     "ContactPointEmail": {
         "label": "Contact Point Email",
-        "required_fields": ["ContactId", "IndividualId"],
-        "filter_field": "ContactId",
+        "required_fields": ["Contact__c"],
+        "contact_field": "Contact__c",
+        "individual_field": None,
     },
 }
 
@@ -99,13 +101,19 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "BillingProfile__c": ["Name", "OwnerId", "CreatedDate", "LastModifiedDate"],
     "Contact": ["FirstName", "LastName", "Email", "Phone", "Title"],
     "Contract": ["ContractNumber", "Status", "StartDate", "EndDate", "OwnerId"],
-    "AccountContactRelation": ["RelationshipRole", "IsActive", "IsDirect", "IsMain", "ContactId"],
+    "AccountContactRelation": ["Roles", "IsActive", "IsDirect", "StartDate", "EndDate"],
     "Case": ["CaseNumber", "Status", "Priority", "Origin", "Subject"],
     "Order": ["OrderNumber", "Status", "EffectiveDate", "TotalAmount", "OwnerId"],
-    "Sale__c": ["Name", "OwnerId", "CreatedDate", "LastModifiedDate"],
+    "Sale__c": [
+        "Name",
+        "Account__c",
+        "Status__c",
+        "SaleStartDate__c",
+        "CreatedDate",
+    ],
     "Individual": ["FirstName", "LastName", "HasOptedOutTracking", "HasOptedOutProfiling"],
-    "ContactPointPhone": ["PhoneNumber", "IsPrimary", "UsageType", "Status"],
-    "ContactPointEmail": ["EmailAddress", "IsPrimary", "UsageType", "Status"],
+    "ContactPointPhone": ["TelephoneNumber", "IsPrimary", "UsageType", "Status__c"],
+    "ContactPointEmail": ["EmailAddress", "IsPrimary", "UsageType", "Status__c"],
 }
 
 
@@ -161,6 +169,8 @@ class ExplorerSession:
 _config_lock = threading.Lock()
 _sessions_lock = threading.Lock()
 _sessions: Dict[str, ExplorerSession] = {}
+_fields_cache_lock = threading.Lock()
+_object_fields_cache: Dict[Tuple[str, str], Set[str]] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -372,18 +382,51 @@ def _format_ids_for_soql(ids: Sequence[str]) -> str:
     return ", ".join(escaped)
 
 
-def _build_query_fields(object_key: str, config: ExplorerConfig) -> Tuple[List[str], List[str]]:
+def _get_object_field_names(org: OrgConfig, object_key: str) -> Set[str]:
+    cache_key = (getattr(org, "id", "") or "", object_key)
+    with _fields_cache_lock:
+        cached = _object_fields_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    fields = describe_sobject(org, object_key)
+    names: Set[str] = set()
+    for field in fields:
+        if isinstance(field, dict):
+            name = field.get("name")
+            if isinstance(name, str) and name:
+                names.add(name)
+    with _fields_cache_lock:
+        _object_fields_cache[cache_key] = names
+    return names
+
+
+def _build_query_fields(org: OrgConfig, object_key: str, config: ExplorerConfig) -> Tuple[List[str], List[str]]:
     definition = _OBJECT_DEFINITIONS.get(object_key, {})
     required = [field for field in definition.get("required_fields", []) if isinstance(field, str)]
+    for extra_field in (
+        definition.get("contact_field"),
+        definition.get("individual_field"),
+    ):
+        if isinstance(extra_field, str) and extra_field and extra_field not in required:
+            required.append(extra_field)
     display_fields = config.get_fields(object_key)
+    try:
+        available_fields = _get_object_field_names(org, object_key)
+    except SalesforceError as exc:
+        logger.warning("Unable to describe %s: %s", object_key, exc)
+        available_fields = set(["Id", *required, *display_fields])
     query_fields: List[str] = ["Id"]
+    sanitized_display: List[str] = []
     for field in required:
-        if field not in query_fields:
+        if field in available_fields and field not in query_fields:
             query_fields.append(field)
     for field in display_fields:
-        if field not in query_fields:
-            query_fields.append(field)
-    return query_fields, ["Id"] + display_fields
+        if field in available_fields:
+            if field not in query_fields:
+                query_fields.append(field)
+            if field not in sanitized_display:
+                sanitized_display.append(field)
+    return query_fields, ["Id"] + sanitized_display
 
 
 def _record_to_field_list(fields: Sequence[str], record: Dict[str, object]) -> List[Dict[str, object]]:
@@ -429,18 +472,32 @@ def _aggregate_individuals_by_account(
 
 def _aggregate_contact_points(
     contact_points: Sequence[Dict[str, object]],
+    contact_field: Optional[str] = None,
+    individual_field: Optional[str] = None,
 ) -> Dict[str, MutableMapping[str, List[Dict[str, object]]]]:
     mapping: Dict[str, MutableMapping[str, List[Dict[str, object]]]] = {
         "contact": {},
         "individual": {},
     }
+    contact_candidates: List[str] = []
+    for field in (contact_field, "ContactId", "Contact__c", "ParentId"):
+        if isinstance(field, str) and field and field not in contact_candidates:
+            contact_candidates.append(field)
+    individual_candidates: List[str] = []
+    for field in (individual_field, "IndividualId", "Individual__c"):
+        if isinstance(field, str) and field and field not in individual_candidates:
+            individual_candidates.append(field)
     for record in contact_points:
-        contact_id = record.get("ContactId")
-        if contact_id:
-            mapping["contact"].setdefault(str(contact_id), []).append(record)
-        individual_id = record.get("IndividualId")
-        if individual_id:
-            mapping["individual"].setdefault(str(individual_id), []).append(record)
+        for field in contact_candidates:
+            contact_id = record.get(field)
+            if contact_id:
+                mapping["contact"].setdefault(str(contact_id), []).append(record)
+                break
+        for field in individual_candidates:
+            individual_id = record.get(field)
+            if individual_id:
+                mapping["individual"].setdefault(str(individual_id), []).append(record)
+                break
     return mapping
 
 
@@ -454,7 +511,9 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     warnings: Dict[str, str] = {}
 
     # Query accounts first
-    account_query_fields, account_display_fields = _build_query_fields("Account", config)
+    account_query_fields, account_display_fields = _build_query_fields(
+        org, "Account", config
+    )
     account_records: Dict[str, Dict[str, object]] = {}
     for chunk in _chunk(sanitized_ids, 100):
         soql = f"SELECT {', '.join(account_query_fields)} FROM Account WHERE Id IN ({_format_ids_for_soql(chunk)})"
@@ -479,7 +538,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     for object_key in direct_objects:
         definition = _OBJECT_DEFINITIONS[object_key]
         filter_field = definition["filter_field"]
-        query_fields, display_fields = _build_query_fields(object_key, config)
+        query_fields, display_fields = _build_query_fields(org, object_key, config)
         records: List[Dict[str, object]] = []
         for chunk in _chunk(sanitized_ids, 100):
             if object_key in warnings:
@@ -492,7 +551,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         results[object_key] = records
 
     contacts = results.get("Contact", [])
-    individuals_config = _build_query_fields("Individual", config)
+    individuals_config = _build_query_fields(org, "Individual", config)
     individual_query_fields, individual_display_fields = individuals_config
     individual_ids: List[str] = []
     contact_ids: List[str] = []
@@ -522,26 +581,63 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         str, Dict[str, MutableMapping[str, List[Dict[str, object]]]]
     ] = {}
     for object_key in contact_point_objects:
-        query_fields, display_fields = _build_query_fields(object_key, config)
+        definition = _OBJECT_DEFINITIONS.get(object_key, {})
+        query_fields, display_fields = _build_query_fields(org, object_key, config)
         records_by_id: Dict[str, Dict[str, object]] = {}
-        if individual_ids:
+        if "individual_field" in definition:
+            raw_individual_field = definition.get("individual_field")
+        else:
+            raw_individual_field = "IndividualId"
+        if "contact_field" in definition:
+            raw_contact_field = definition.get("contact_field")
+        else:
+            raw_contact_field = "ContactId"
+        individual_field = ""
+        contact_field = ""
+        if raw_individual_field is not None:
+            individual_field = str(raw_individual_field)
+        if raw_contact_field is not None:
+            contact_field = str(raw_contact_field)
+        try:
+            available_contact_point_fields = _get_object_field_names(org, object_key)
+        except SalesforceError as exc:
+            logger.warning("Unable to describe %s: %s", object_key, exc)
+            available_contact_point_fields = set()
+        if (
+            individual_field
+            and individual_field.lower() != "none"
+            and individual_field not in available_contact_point_fields
+        ):
+            individual_field = ""
+        if (
+            contact_field
+            and contact_field.lower() != "none"
+            and contact_field not in available_contact_point_fields
+        ):
+            contact_field = ""
+        if individual_field and individual_field.lower() != "none" and individual_ids:
             for chunk in _chunk(individual_ids, 100):
                 if object_key in warnings:
                     break
                 soql = (
-                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE IndividualId IN ({_format_ids_for_soql(chunk)})"
+                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {individual_field} IN ({_format_ids_for_soql(chunk)})"
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
                     record_id = record.get("Id")
                     if record_id:
                         records_by_id[str(record_id)] = record
-        if object_key not in warnings and contact_ids:
+        if (
+            object_key not in warnings
+            and contact_field
+            and contact_field.lower() != "none"
+            and contact_ids
+        ):
             for chunk in _chunk(contact_ids, 100):
                 if object_key in warnings:
                     break
                 soql = (
-                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE ContactId IN ({_format_ids_for_soql(chunk)})"
+                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {contact_field} IN ({_format_ids_for_soql(chunk)})"
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
@@ -550,7 +646,11 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                         records_by_id[str(record_id)] = record
         records = list(records_by_id.values())
         results[object_key] = records
-        contact_point_mappings[object_key] = _aggregate_contact_points(records)
+        contact_point_mappings[object_key] = _aggregate_contact_points(
+            records,
+            contact_field=contact_field,
+            individual_field=individual_field,
+        )
 
     contact_by_account = _map_records_by_field(contacts, "AccountId")
     individual_by_account = _aggregate_individuals_by_account(contacts, individual_records)
@@ -580,7 +680,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         for obj in CONNECTED_OBJECTS:
             key = obj["key"]
             definition = _OBJECT_DEFINITIONS.get(key, {})
-            _, display_fields = _build_query_fields(key, config)
+            _, display_fields = _build_query_fields(org, key, config)
             related_records: List[Dict[str, object]]
             if key == "Contact":
                 related_records = contact_by_account.get(account_id, [])
