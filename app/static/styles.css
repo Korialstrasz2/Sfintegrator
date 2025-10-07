@@ -200,6 +200,172 @@ body.theme-sci-fi {
   position: relative;
 }
 
+.query-composer-stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.query-composer-step-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  background-color: var(--bs-body-bg, #ffffff);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+  font-weight: 600;
+  color: inherit;
+}
+
+.query-composer-step-button .step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.12);
+  color: var(--bs-primary, #0d6efd);
+  font-size: 0.95rem;
+}
+
+.query-composer-step-button.active,
+.query-composer-step-button:hover,
+.query-composer-step-button:focus {
+  border-color: var(--bs-primary, #0d6efd);
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08);
+  text-decoration: none;
+}
+
+.query-composer-template.active,
+.query-composer-template.active:hover,
+.query-composer-template.active:focus {
+  border-color: var(--bs-primary, #0d6efd);
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.12);
+  color: var(--bs-primary, #0d6efd);
+}
+
+.query-composer-step {
+  display: none;
+}
+
+.query-composer-step.active {
+  display: block;
+}
+
+.query-composer-list {
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  max-height: 320px;
+  overflow-y: auto;
+  background-color: var(--bs-body-bg, #ffffff);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.query-composer-field-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.query-composer-field-item:hover,
+.query-composer-field-item:focus-within {
+  border-color: var(--bs-border-color, #ced4da);
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08);
+}
+
+.query-composer-field-item.active {
+  border-color: var(--bs-primary, #0d6efd);
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.12);
+}
+
+.query-composer-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  min-height: 3rem;
+  border: 1px dashed var(--bs-border-color, #ced4da);
+  border-radius: 0.75rem;
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.03);
+}
+
+.query-composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.1);
+  color: var(--bs-primary, #0d6efd);
+  font-weight: 600;
+}
+
+.query-composer-chip button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.query-composer-collection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.query-composer-collection .composer-card {
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background-color: var(--bs-body-bg, #ffffff);
+}
+
+.query-composer-preview pre {
+  background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.04);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  font-family: var(--bs-font-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.theme-dark .query-composer-step-button,
+.theme-sci-fi .query-composer-step-button,
+.theme-dark .query-composer-list,
+.theme-sci-fi .query-composer-list,
+.theme-dark .query-composer-collection .composer-card,
+.theme-sci-fi .query-composer-collection .composer-card {
+  background-color: rgba(15, 23, 42, 0.9);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.theme-dark .query-composer-selected,
+.theme-sci-fi .query-composer-selected {
+  background-color: rgba(59, 130, 246, 0.08);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.theme-dark .query-composer-preview pre,
+.theme-sci-fi .query-composer-preview pre {
+  background-color: rgba(56, 189, 248, 0.12);
+}
+
 .query-sidebar {
   z-index: 2;
 }
