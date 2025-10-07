@@ -1,3 +1,18 @@
+function createDefaultComposerState() {
+  return {
+    step: 0,
+    template: "custom",
+    baseObject: "",
+    alias: "",
+    fields: [],
+    customFields: [],
+    childQueries: [],
+    conditions: [],
+    orderBy: [],
+    limit: "",
+  };
+}
+
 const state = {
   selectedOrg: null,
   savedQueries: [],
@@ -18,6 +33,7 @@ const state = {
     records: [],
     queryFields: [],
   },
+  queryComposer: createDefaultComposerState(),
 };
 
 const STORAGE_PREFIX = "sfint";
@@ -27,6 +43,51 @@ const STORAGE_KEYS = {
   selectedOrg: `${STORAGE_PREFIX}.selectedOrg`,
   queryDraft: `${STORAGE_PREFIX}.queryDraft`,
 };
+
+const COMPOSER_TOTAL_STEPS = 4;
+
+const queryComposerTemplates = [
+  {
+    id: "custom",
+    titleKey: "index.query.composer.steps.templates.options.custom.title",
+    descriptionKey: "index.query.composer.steps.templates.options.custom.description",
+  },
+  {
+    id: "basic",
+    titleKey: "index.query.composer.steps.templates.options.basic.title",
+    descriptionKey: "index.query.composer.steps.templates.options.basic.description",
+  },
+  {
+    id: "recent",
+    titleKey: "index.query.composer.steps.templates.options.recent.title",
+    descriptionKey: "index.query.composer.steps.templates.options.recent.description",
+  },
+  {
+    id: "childSummary",
+    titleKey: "index.query.composer.steps.templates.options.child_summary.title",
+    descriptionKey: "index.query.composer.steps.templates.options.child_summary.description",
+  },
+];
+
+const COMPOSER_OPERATORS = [
+  "=",
+  "!=",
+  ">",
+  "<",
+  ">=",
+  "<=",
+  "LIKE",
+  "NOT LIKE",
+  "IN",
+  "NOT IN",
+  "INCLUDES",
+  "EXCLUDES",
+  "STARTS WITH",
+  "ENDS WITH",
+  "CONTAINS",
+  "IS NULL",
+  "IS NOT NULL",
+];
 
 function getLocalStorage() {
   try {
@@ -184,6 +245,847 @@ function saveQueryDraftToStorage(value) {
 
 function clearQueryDraftFromStorage() {
   removeFromStorage(STORAGE_KEYS.queryDraft);
+}
+
+function updateComposerState(patch = null) {
+  if (patch && typeof patch === "object") {
+    Object.assign(state.queryComposer, patch);
+  }
+  renderComposerStepIndicators();
+  renderComposerSteps();
+  renderComposerTemplates();
+  renderComposerChildQueries();
+  renderComposerFieldList();
+  renderComposerSelectedFields();
+  renderComposerConditions();
+  renderComposerOrderBy();
+  renderComposerPreview();
+  updateComposerFieldOptions();
+}
+
+function resetComposerState() {
+  state.queryComposer = createDefaultComposerState();
+  updateComposerState();
+}
+
+function createComposerId(prefix) {
+  try {
+    if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+  } catch (error) {
+    // continue with fallback
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function setComposerStep(step = 0) {
+  const value = Math.max(0, Math.min(COMPOSER_TOTAL_STEPS - 1, Number(step)));
+  if (state.queryComposer.step !== value) {
+    state.queryComposer.step = value;
+    renderComposerStepIndicators();
+    renderComposerSteps();
+  }
+}
+
+function getComposerAvailableFields(objectName = state.queryComposer.baseObject) {
+  if (!objectName) {
+    return [];
+  }
+  const fields = state.metadata.fields?.[objectName];
+  if (!Array.isArray(fields)) {
+    return [];
+  }
+  return fields.map((field) => field.name).filter(Boolean);
+}
+
+function updateComposerFieldOptions() {
+  const datalist = document.getElementById("query-composer-field-options");
+  if (!datalist) {
+    return;
+  }
+  datalist.innerHTML = "";
+  const values = new Set([
+    ...getComposerAvailableFields(),
+    ...state.queryComposer.fields,
+    ...state.queryComposer.customFields,
+  ]);
+  values.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    datalist.appendChild(option);
+  });
+}
+
+function renderComposerStepIndicators() {
+  const container = document.getElementById("query-composer-step-indicators");
+  if (!container) {
+    return;
+  }
+  const current = state.queryComposer.step;
+  container.querySelectorAll(".composer-step-indicator").forEach((stepEl) => {
+    const stepIndex = Number(stepEl.dataset.step);
+    if (Number.isNaN(stepIndex)) {
+      return;
+    }
+    stepEl.classList.toggle("active", stepIndex === current);
+    stepEl.classList.toggle("completed", stepIndex < current);
+  });
+}
+
+function renderComposerSteps() {
+  const container = document.getElementById("query-composer-steps");
+  if (!container) {
+    return;
+  }
+  const current = state.queryComposer.step;
+  container.querySelectorAll(".composer-step").forEach((stepEl) => {
+    const stepIndex = Number(stepEl.dataset.step);
+    if (Number.isNaN(stepIndex)) {
+      return;
+    }
+    stepEl.classList.toggle("active", stepIndex === current);
+    stepEl.classList.toggle("d-none", stepIndex !== current);
+  });
+  const backButton = document.querySelector("[data-composer-action='back']");
+  if (backButton) {
+    backButton.disabled = current === 0;
+  }
+  const nextButton = document.querySelector("[data-composer-action='next']");
+  if (nextButton) {
+    nextButton.classList.toggle("d-none", current === COMPOSER_TOTAL_STEPS - 1);
+  }
+  const insertButton = document.querySelector("[data-composer-action='insert']");
+  if (insertButton) {
+    insertButton.classList.toggle("d-none", current !== COMPOSER_TOTAL_STEPS - 1);
+  }
+}
+
+function renderComposerTemplates() {
+  const container = document.getElementById("query-composer-template-options");
+  if (!container) {
+    return;
+  }
+  const current = state.queryComposer.template;
+  container.querySelectorAll("[data-template-id]").forEach((card) => {
+    const isActive = card.dataset.templateId === current;
+    card.classList.toggle("active", isActive);
+    card.setAttribute("aria-selected", String(isActive));
+  });
+}
+
+function normalizeFieldList(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function applyComposerTemplateDefaults(options = {}) {
+  const template = queryComposerTemplates.find((item) => item.id === state.queryComposer.template);
+  if (!template) {
+    return;
+  }
+  const objectName = state.queryComposer.baseObject;
+  const availableFields = getComposerAvailableFields(objectName);
+  if (!objectName && template.id !== "custom") {
+    return;
+  }
+
+  const defaults = {
+    fields: [],
+    customFields: [],
+    childQueries: [],
+    conditions: [],
+    orderBy: [],
+    limit: "",
+  };
+
+  if (template.id === "basic") {
+    const preferred = ["Id", "Name", "CreatedDate", "LastModifiedDate"];
+    defaults.fields = preferred.filter((field) => availableFields.includes(field));
+    if (!defaults.fields.length && availableFields.length) {
+      defaults.fields = availableFields.slice(0, Math.min(4, availableFields.length));
+    }
+  } else if (template.id === "recent") {
+    const baseFields = ["Id", "Name", "LastModifiedDate", "LastModifiedById"];
+    defaults.fields = baseFields.filter((field) => availableFields.includes(field));
+    if (!defaults.fields.length && availableFields.length) {
+      defaults.fields = availableFields.slice(0, Math.min(5, availableFields.length));
+    }
+    if (availableFields.includes("LastModifiedDate")) {
+      defaults.orderBy = [
+        {
+          id: createComposerId("order"),
+          field: "LastModifiedDate",
+          direction: "DESC",
+        },
+      ];
+    }
+    defaults.limit = "100";
+  } else if (template.id === "childSummary") {
+    defaults.fields = availableFields.includes("Id") ? ["Id"] : [];
+    if (availableFields.includes("Name")) {
+      defaults.fields.push("Name");
+    }
+    defaults.childQueries = [
+      {
+        id: createComposerId("child"),
+        relationshipName: "ChildRelationship",
+        fields: ["Id", "Name"],
+        conditions: "",
+        orderBy: "",
+        limit: "",
+      },
+    ];
+  }
+
+  if (options?.preserveManualFields) {
+    defaults.fields = Array.from(new Set([...(defaults.fields || []), ...state.queryComposer.fields]));
+    defaults.customFields = Array.from(
+      new Set([...(defaults.customFields || []), ...state.queryComposer.customFields])
+    );
+  }
+
+  state.queryComposer.fields = defaults.fields || [];
+  state.queryComposer.customFields = defaults.customFields || [];
+  state.queryComposer.childQueries = defaults.childQueries || [];
+  state.queryComposer.conditions = defaults.conditions || state.queryComposer.conditions || [];
+  state.queryComposer.orderBy = defaults.orderBy || [];
+  state.queryComposer.limit = defaults.limit || state.queryComposer.limit || "";
+  updateComposerFieldOptions();
+  renderComposerChildQueries();
+  renderComposerFieldList();
+  renderComposerSelectedFields();
+  renderComposerOrderBy();
+  renderComposerPreview();
+}
+
+function renderComposerChildQueries() {
+  const list = document.getElementById("query-composer-child-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = "";
+  if (!state.queryComposer.childQueries.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("index.query.composer.steps.object.child_empty");
+    list.appendChild(empty);
+    return;
+  }
+
+  state.queryComposer.childQueries.forEach((child) => {
+    const item = document.createElement("div");
+    item.className = "composer-chip";
+    const title = document.createElement("div");
+    title.className = "composer-chip-title";
+    title.textContent = child.relationshipName;
+    item.appendChild(title);
+    const details = document.createElement("div");
+    details.className = "composer-chip-description";
+    const fields = child.fields.join(", ");
+    const parts = [fields];
+    if (child.conditions) {
+      parts.push(`${translate("index.query.composer.steps.object.labels.where")}: ${child.conditions}`);
+    }
+    if (child.orderBy) {
+      parts.push(`${translate("index.query.composer.steps.filters.labels.order_by")}: ${child.orderBy}`);
+    }
+    if (child.limit) {
+      parts.push(`${translate("index.query.composer.steps.filters.labels.limit")}: ${child.limit}`);
+    }
+    details.textContent = parts.filter(Boolean).join(" • ");
+    item.appendChild(details);
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "btn btn-sm btn-outline-danger";
+    removeButton.dataset.childId = child.id;
+    removeButton.textContent = translate("index.query.composer.common.remove_button");
+    removeButton.addEventListener("click", () => {
+      state.queryComposer.childQueries = state.queryComposer.childQueries.filter((entry) => entry.id !== child.id);
+      renderComposerChildQueries();
+      renderComposerPreview();
+    });
+    item.appendChild(removeButton);
+    list.appendChild(item);
+  });
+}
+
+function renderComposerFieldList() {
+  const container = document.getElementById("query-composer-field-options-container");
+  if (!container) {
+    return;
+  }
+  const search = document.getElementById("query-composer-field-search");
+  const filter = search ? search.value.trim().toLowerCase() : "";
+  const fields = getComposerAvailableFields();
+  container.innerHTML = "";
+  if (!fields.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("index.query.composer.steps.fields.empty");
+    container.appendChild(empty);
+    return;
+  }
+
+  fields
+    .filter((field) => !filter || field.toLowerCase().includes(filter))
+    .slice(0, 150)
+    .forEach((field) => {
+      const id = `composer-field-${field.replace(/[^a-z0-9]/gi, "-")}`;
+      const wrapper = document.createElement("div");
+      wrapper.className = "form-check";
+      const input = document.createElement("input");
+      input.className = "form-check-input";
+      input.type = "checkbox";
+      input.id = id;
+      input.value = field;
+      input.checked = state.queryComposer.fields.includes(field);
+      input.addEventListener("change", (event) => {
+        if (event.target.checked) {
+          if (!state.queryComposer.fields.includes(field)) {
+            state.queryComposer.fields.push(field);
+          }
+        } else {
+          state.queryComposer.fields = state.queryComposer.fields.filter((item) => item !== field);
+        }
+        renderComposerSelectedFields();
+        renderComposerPreview();
+        updateComposerFieldOptions();
+      });
+      const label = document.createElement("label");
+      label.className = "form-check-label";
+      label.htmlFor = id;
+      label.textContent = field;
+      wrapper.appendChild(input);
+      wrapper.appendChild(label);
+      container.appendChild(wrapper);
+    });
+}
+
+function renderComposerSelectedFields() {
+  const container = document.getElementById("query-composer-selected-fields");
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  const allFields = [...state.queryComposer.fields, ...state.queryComposer.customFields];
+  if (!allFields.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("index.query.composer.steps.fields.selected_empty");
+    container.appendChild(empty);
+    return;
+  }
+  allFields.forEach((field) => {
+    const chip = document.createElement("div");
+    chip.className = "composer-chip";
+    chip.textContent = field;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-sm btn-outline-danger";
+    remove.textContent = translate("index.query.composer.common.remove_button");
+    remove.addEventListener("click", () => {
+      state.queryComposer.fields = state.queryComposer.fields.filter((item) => item !== field);
+      state.queryComposer.customFields = state.queryComposer.customFields.filter((item) => item !== field);
+      renderComposerFieldList();
+      renderComposerSelectedFields();
+      renderComposerPreview();
+      updateComposerFieldOptions();
+    });
+    chip.appendChild(remove);
+    container.appendChild(chip);
+  });
+}
+
+function renderComposerConditions() {
+  const list = document.getElementById("query-composer-condition-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = "";
+  if (!state.queryComposer.conditions.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("index.query.composer.steps.filters.conditions_empty");
+    list.appendChild(empty);
+    return;
+  }
+  state.queryComposer.conditions.forEach((condition) => {
+    const chip = document.createElement("div");
+    chip.className = "composer-chip";
+    chip.textContent = condition.label;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-sm btn-outline-danger";
+    remove.dataset.conditionId = condition.id;
+    remove.textContent = translate("index.query.composer.common.remove_button");
+    remove.addEventListener("click", () => {
+      state.queryComposer.conditions = state.queryComposer.conditions.filter((item) => item.id !== condition.id);
+      renderComposerConditions();
+      renderComposerPreview();
+    });
+    chip.appendChild(remove);
+    list.appendChild(chip);
+  });
+}
+
+function renderComposerOrderBy() {
+  const list = document.getElementById("query-composer-order-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = "";
+  if (!state.queryComposer.orderBy.length) {
+    const empty = document.createElement("p");
+    empty.className = "text-muted small mb-0";
+    empty.textContent = translate("index.query.composer.steps.filters.order_empty");
+    list.appendChild(empty);
+    return;
+  }
+  state.queryComposer.orderBy.forEach((entry) => {
+    const chip = document.createElement("div");
+    chip.className = "composer-chip";
+    chip.textContent = `${entry.field} ${entry.direction || "ASC"}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-sm btn-outline-danger";
+    remove.dataset.orderId = entry.id;
+    remove.textContent = translate("index.query.composer.common.remove_button");
+    remove.addEventListener("click", () => {
+      state.queryComposer.orderBy = state.queryComposer.orderBy.filter((item) => item.id !== entry.id);
+      renderComposerOrderBy();
+      renderComposerPreview();
+    });
+    chip.appendChild(remove);
+    list.appendChild(chip);
+  });
+}
+
+function buildComposerChildQuery(child) {
+  if (!child?.relationshipName || !Array.isArray(child.fields) || !child.fields.length) {
+    return null;
+  }
+  const parts = [`SELECT ${child.fields.join(", ")}`, `FROM ${child.relationshipName}`];
+  if (child.conditions) {
+    parts.push(`WHERE ${child.conditions}`);
+  }
+  if (child.orderBy) {
+    parts.push(`ORDER BY ${child.orderBy}`);
+  }
+  if (child.limit) {
+    parts.push(`LIMIT ${child.limit}`);
+  }
+  return `(${parts.join(" ")})`;
+}
+
+function buildComposerQuery() {
+  const objectName = state.queryComposer.baseObject;
+  if (!objectName) {
+    return "";
+  }
+  const selectFields = [...state.queryComposer.fields, ...state.queryComposer.customFields];
+  const childParts = state.queryComposer.childQueries
+    .map((child) => buildComposerChildQuery(child))
+    .filter(Boolean);
+  const fields = [...selectFields, ...childParts].filter(Boolean);
+  if (!fields.length) {
+    fields.push("Id");
+  }
+  const lines = [`SELECT ${fields.join(", ")}`, `FROM ${objectName}`];
+  if (state.queryComposer.alias) {
+    lines[1] = `${lines[1]} ${state.queryComposer.alias}`;
+  }
+  if (state.queryComposer.conditions.length) {
+    const whereClause = state.queryComposer.conditions.map((condition) => condition.value).join(" AND ");
+    lines.push(`WHERE ${whereClause}`);
+  }
+  if (state.queryComposer.orderBy.length) {
+    const orderClause = state.queryComposer.orderBy
+      .map((entry) => `${entry.field} ${entry.direction || "ASC"}`.trim())
+      .join(", ");
+    lines.push(`ORDER BY ${orderClause}`);
+  }
+  if (state.queryComposer.limit) {
+    lines.push(`LIMIT ${state.queryComposer.limit}`);
+  }
+  return lines.join("\n");
+}
+
+function renderComposerPreview() {
+  const preview = document.getElementById("query-composer-preview");
+  if (!preview) {
+    return;
+  }
+  const query = buildComposerQuery();
+  preview.textContent = query || translate("index.query.composer.preview_empty");
+}
+
+function insertComposerQuery() {
+  const query = buildComposerQuery();
+  if (!query) {
+    showToast(translate("frontend.toast.composer_select_field"), "warning");
+    return;
+  }
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) {
+    return;
+  }
+  textarea.value = query;
+  applyKeywordFormatting(textarea, { preserveCursor: false });
+  refreshQueryEditorState();
+  saveQueryDraftToStorage(textarea.value);
+  const modalElement = document.getElementById("query-composer-modal");
+  if (modalElement) {
+    const modal = bootstrap.Modal.getInstance(modalElement);
+    modal?.hide();
+  }
+  showToast(translate("frontend.toast.composer_inserted"), "success");
+}
+
+function handleComposerNextStep() {
+  const step = state.queryComposer.step;
+  if (step === 1 && !state.queryComposer.baseObject) {
+    showToast(translate("frontend.toast.composer_select_object"), "warning");
+    return;
+  }
+  if (step === 2) {
+    if (!state.queryComposer.fields.length && !state.queryComposer.customFields.length) {
+      showToast(translate("frontend.toast.composer_select_field"), "warning");
+      return;
+    }
+  }
+  setComposerStep(step + 1);
+}
+
+function handleComposerAddChild() {
+  const nameInput = document.getElementById("query-composer-child-name");
+  const fieldsInput = document.getElementById("query-composer-child-fields");
+  if (!nameInput || !fieldsInput) {
+    return;
+  }
+  const relationshipName = nameInput.value.trim();
+  const fields = normalizeFieldList(fieldsInput.value);
+  if (!relationshipName || !fields.length) {
+    showToast(translate("frontend.toast.composer_child_invalid"), "warning");
+    return;
+  }
+  const conditionsInput = document.getElementById("query-composer-child-conditions");
+  const orderInput = document.getElementById("query-composer-child-order");
+  const limitInput = document.getElementById("query-composer-child-limit");
+  state.queryComposer.childQueries.push({
+    id: createComposerId("child"),
+    relationshipName,
+    fields,
+    conditions: conditionsInput?.value.trim() || "",
+    orderBy: orderInput?.value.trim() || "",
+    limit: limitInput?.value.trim() || "",
+  });
+  nameInput.value = "";
+  fieldsInput.value = "";
+  if (conditionsInput) conditionsInput.value = "";
+  if (orderInput) orderInput.value = "";
+  if (limitInput) limitInput.value = "";
+  renderComposerChildQueries();
+  renderComposerPreview();
+}
+
+function handleComposerAddCustomField() {
+  const input = document.getElementById("query-composer-custom-field");
+  if (!input) {
+    return;
+  }
+  const value = input.value.trim();
+  if (!value) {
+    return;
+  }
+  if (!state.queryComposer.customFields.includes(value) && !state.queryComposer.fields.includes(value)) {
+    state.queryComposer.customFields.push(value);
+    renderComposerSelectedFields();
+    renderComposerPreview();
+    updateComposerFieldOptions();
+  }
+  input.value = "";
+}
+
+function handleComposerAddCondition() {
+  const fieldInput = document.getElementById("query-composer-condition-field");
+  const operatorSelect = document.getElementById("query-composer-condition-operator");
+  const valueInput = document.getElementById("query-composer-condition-value");
+  if (!fieldInput || !operatorSelect || !valueInput) {
+    return;
+  }
+  const field = fieldInput.value.trim();
+  const operator = operatorSelect.value.trim();
+  let rawValue = valueInput.value.trim();
+  if (!field || !operator) {
+    showToast(translate("frontend.toast.composer_condition_invalid"), "warning");
+    return;
+  }
+  const operatorsWithoutValue = new Set(["IS NULL", "IS NOT NULL"]);
+  if (!rawValue && !operatorsWithoutValue.has(operator)) {
+    showToast(translate("frontend.toast.composer_condition_invalid"), "warning");
+    return;
+  }
+  const requiresList = new Set(["IN", "NOT IN"]);
+  if (requiresList.has(operator)) {
+    const values = normalizeFieldList(rawValue);
+    rawValue = values.length ? `(${values.map((val) => `'${val}'`).join(", ")})` : "";
+  } else if (!operatorsWithoutValue.has(operator)) {
+    if (!/^\d+(\.\d+)?$/.test(rawValue) && !/^'.*'$/.test(rawValue) && !/^".*"$/.test(rawValue)) {
+      rawValue = `'${rawValue}'`;
+    }
+  }
+  const conditionText = operatorsWithoutValue.has(operator)
+    ? `${field} ${operator}`
+    : `${field} ${operator} ${rawValue}`;
+  const id = createComposerId("condition");
+  state.queryComposer.conditions.push({
+    id,
+    field,
+    operator,
+    value: conditionText,
+    label: conditionText,
+  });
+  fieldInput.value = "";
+  operatorSelect.value = "";
+  valueInput.value = "";
+  renderComposerConditions();
+  renderComposerPreview();
+}
+
+function handleComposerAddOrder() {
+  const fieldInput = document.getElementById("query-composer-order-field");
+  const directionSelect = document.getElementById("query-composer-order-direction");
+  if (!fieldInput || !directionSelect) {
+    return;
+  }
+  const field = fieldInput.value.trim();
+  const direction = directionSelect.value.trim() || "ASC";
+  if (!field) {
+    showToast(translate("frontend.toast.composer_order_invalid"), "warning");
+    return;
+  }
+  state.queryComposer.orderBy.push({
+    id: createComposerId("order"),
+    field,
+    direction,
+  });
+  fieldInput.value = "";
+  directionSelect.value = "ASC";
+  renderComposerOrderBy();
+  renderComposerPreview();
+}
+
+function handleComposerLimitChange() {
+  const input = document.getElementById("query-composer-limit");
+  if (!input) {
+    return;
+  }
+  const value = input.value.trim();
+  state.queryComposer.limit = value;
+  renderComposerPreview();
+}
+
+function populateComposerObjects() {
+  const datalist = document.getElementById("query-composer-object-options");
+  if (!datalist) {
+    return;
+  }
+  datalist.innerHTML = "";
+  if (!Array.isArray(state.metadata.objects) || !state.metadata.objects.length) {
+    return;
+  }
+  state.metadata.objects
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+    .forEach((object) => {
+      const option = document.createElement("option");
+      option.value = object.name;
+      option.label = object.label || object.name;
+      datalist.appendChild(option);
+    });
+}
+
+function openQueryComposerModal() {
+  if (!state.selectedOrg) {
+    showToast(translate("frontend.toast.composer_requires_org"), "warning");
+    return;
+  }
+  populateComposerObjects();
+  updateComposerFieldOptions();
+  renderComposerStepIndicators();
+  renderComposerSteps();
+  renderComposerTemplates();
+  renderComposerChildQueries();
+  renderComposerFieldList();
+  renderComposerSelectedFields();
+  renderComposerConditions();
+  renderComposerOrderBy();
+  renderComposerPreview();
+  const modalElement = document.getElementById("query-composer-modal");
+  if (!modalElement) {
+    return;
+  }
+  const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+  modal.show();
+}
+
+function initializeQueryComposer() {
+  const openButton = document.getElementById("open-query-composer");
+  const modalElement = document.getElementById("query-composer-modal");
+  if (!openButton || !modalElement) {
+    return;
+  }
+
+  openButton.addEventListener("click", () => {
+    if (!state.metadata.objects.length && state.selectedOrg) {
+      loadMetadataForSelectedOrg();
+    }
+    openQueryComposerModal();
+  });
+
+  modalElement.addEventListener("show.bs.modal", () => {
+    if (!state.queryComposer.baseObject && state.metadata.selectedObject) {
+      state.queryComposer.baseObject = state.metadata.selectedObject;
+      applyComposerTemplateDefaults({ preserveManualFields: true });
+    }
+    const objectInputEl = document.getElementById("query-composer-object");
+    if (objectInputEl) {
+      objectInputEl.value = state.queryComposer.baseObject || "";
+    }
+    const aliasInputEl = document.getElementById("query-composer-alias");
+    if (aliasInputEl) {
+      aliasInputEl.value = state.queryComposer.alias || "";
+    }
+    renderComposerPreview();
+  });
+
+  modalElement.addEventListener("hidden.bs.modal", () => {
+    resetComposerState();
+    [
+      "query-composer-object",
+      "query-composer-alias",
+      "query-composer-child-name",
+      "query-composer-child-fields",
+      "query-composer-child-conditions",
+      "query-composer-child-order",
+      "query-composer-child-limit",
+      "query-composer-field-search",
+      "query-composer-custom-field",
+      "query-composer-condition-field",
+      "query-composer-condition-value",
+      "query-composer-order-field",
+      "query-composer-limit",
+    ].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) {
+        input.value = "";
+      }
+    });
+    const operatorSelect = document.getElementById("query-composer-condition-operator");
+    if (operatorSelect) {
+      operatorSelect.value = "";
+    }
+    const directionSelect = document.getElementById("query-composer-order-direction");
+    if (directionSelect) {
+      directionSelect.value = "ASC";
+    }
+  });
+
+  document
+    .getElementById("query-composer-template-options")
+    ?.querySelectorAll("[data-template-id]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        state.queryComposer.template = button.dataset.templateId;
+        renderComposerTemplates();
+        applyComposerTemplateDefaults();
+      });
+    });
+
+  const objectInput = document.getElementById("query-composer-object");
+  if (objectInput) {
+    objectInput.addEventListener("change", async () => {
+      const objectName = objectInput.value.trim();
+      state.queryComposer.baseObject = objectName;
+      if (objectName) {
+        await loadFieldsForObject(objectName);
+        applyComposerTemplateDefaults();
+      }
+      renderComposerFieldList();
+      renderComposerSelectedFields();
+      renderComposerPreview();
+    });
+  }
+
+  const aliasInput = document.getElementById("query-composer-alias");
+  if (aliasInput) {
+    aliasInput.addEventListener("input", () => {
+      state.queryComposer.alias = aliasInput.value.trim();
+      renderComposerPreview();
+    });
+  }
+
+  const fieldSearch = document.getElementById("query-composer-field-search");
+  if (fieldSearch) {
+    fieldSearch.addEventListener("input", () => {
+      renderComposerFieldList();
+    });
+  }
+
+  const addChildButton = document.getElementById("query-composer-add-child");
+  if (addChildButton) {
+    addChildButton.addEventListener("click", handleComposerAddChild);
+  }
+
+  const addCustomFieldButton = document.getElementById("query-composer-add-custom-field");
+  if (addCustomFieldButton) {
+    addCustomFieldButton.addEventListener("click", handleComposerAddCustomField);
+  }
+
+  const addConditionButton = document.getElementById("query-composer-add-condition");
+  if (addConditionButton) {
+    addConditionButton.addEventListener("click", handleComposerAddCondition);
+  }
+
+  const addOrderButton = document.getElementById("query-composer-add-order");
+  if (addOrderButton) {
+    addOrderButton.addEventListener("click", handleComposerAddOrder);
+  }
+
+  const limitInput = document.getElementById("query-composer-limit");
+  if (limitInput) {
+    limitInput.addEventListener("input", handleComposerLimitChange);
+  }
+
+  const nextButton = document.querySelector("[data-composer-action='next']");
+  nextButton?.addEventListener("click", handleComposerNextStep);
+
+  const backButton = document.querySelector("[data-composer-action='back']");
+  backButton?.addEventListener("click", () => setComposerStep(state.queryComposer.step - 1));
+
+  const insertButton = document.querySelector("[data-composer-action='insert']");
+  insertButton?.addEventListener("click", insertComposerQuery);
+
+  const templateOptions = document.getElementById("query-composer-template-options");
+  if (templateOptions) {
+    templateOptions.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      const target = event.target.closest("[data-template-id]");
+      if (!target) {
+        return;
+      }
+      event.preventDefault();
+      target.click();
+    });
+  }
 }
 
 function applyLanguage(language) {
@@ -1708,12 +2610,14 @@ async function loadMetadataForSelectedOrg() {
       throw new Error(data.error || translate("toast.metadata_fetch_failed"));
     }
     state.metadata.objects = Array.isArray(data) ? data : [];
+    populateComposerObjects();
   } catch (error) {
     const message = error instanceof Error ? error.message : translate("toast.metadata_fetch_failed");
     showToast(message, "danger");
   } finally {
     showElement(loading, false);
     renderObjectList();
+    populateComposerObjects();
   }
 }
 
@@ -2042,6 +2946,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeSavedQueries();
   initializeQueryHistory();
   initializeAutocomplete();
+  initializeQueryComposer();
   if (!state.selectedOrg) {
     loadMetadataForSelectedOrg();
   }
