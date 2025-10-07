@@ -15,6 +15,7 @@ from .salesforce import (
     SalesforceError,
     build_authorize_url,
     describe_sobject,
+    describe_sobject_with_relationships,
     exchange_code_for_token,
     list_sobjects,
     query,
@@ -25,6 +26,11 @@ from .i18n import (DEFAULT_LANGUAGE, get_frontend_translations,
                    translate)
 from .storage import (OrgConfig, query_history_storage, saved_queries_storage,
                       storage)
+from .complex_account import (
+    parse_complex_account_config,
+    run_complex_account_query,
+    build_single_query,
+)
 
 main_bp = Blueprint("main", __name__)
 
@@ -115,6 +121,180 @@ def _pop_code_verifier(nonce: str) -> str | None:
 def index() -> str:
     orgs = [serialize_org(org) for org in storage.list()]
     return render_template("index.html", orgs=orgs)
+
+
+@main_bp.route("/complex-account")
+def complex_account() -> str:
+    orgs = [serialize_org(org) for org in storage.list()]
+    language = session.get("language", DEFAULT_LANGUAGE)
+    templates = [
+        {
+            "id": "account_contacts_individuals",
+            "name": translate("complex_account.templates.account_contacts_individuals.name", language),
+            "description": translate(
+                "complex_account.templates.account_contacts_individuals.description", language
+            ),
+            "config": {
+                "root_object": "Account",
+                "root_label": translate("complex_account.object_labels.account", language),
+                "root_fields": [
+                    "Name",
+                    "AccountNumber",
+                    "BillingStreet",
+                    "BillingCity",
+                    "BillingCountry",
+                    "Industry",
+                ],
+                "filters": "",
+                "relationships": [
+                    {
+                        "id": "contacts",
+                        "type": "child",
+                        "object_name": "Contact",
+                        "label": translate("complex_account.object_labels.contact", language),
+                        "relationship_name": "Contacts",
+                        "relationship_field": "AccountId",
+                        "fields": [
+                            "Id",
+                            "FirstName",
+                            "LastName",
+                            "Email",
+                            "Phone",
+                        ],
+                        "filters": "",
+                        "children": [
+                            {
+                                "id": "contact_individual",
+                                "type": "parent",
+                                "object_name": "Individual",
+                                "label": translate(
+                                    "complex_account.object_labels.individual", language
+                                ),
+                                "relationship_name": "Individual",
+                                "fields": [
+                                    "Id",
+                                    "FirstName",
+                                    "LastName",
+                                    "Email",
+                                    "IndividualType",
+                                ],
+                                "children": [
+                                    {
+                                        "id": "individual_contact_points",
+                                        "type": "child",
+                                        "object_name": "ContactPointEmail",
+                                        "label": translate(
+                                            "complex_account.object_labels.contact_point_email", language
+                                        ),
+                                        "relationship_name": "ContactPoints",
+                                        "relationship_field": "IndividualId",
+                                        "fields": [
+                                            "Id",
+                                            "EmailAddress",
+                                            "UsageType",
+                                            "IsPrimary",
+                                        ],
+                                        "filters": "",
+                                        "children": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "account_billing_profiles",
+                        "type": "child",
+                        "object_name": "AccountPaymentProfile",
+                        "label": translate(
+                            "complex_account.object_labels.account_payment_profile", language
+                        ),
+                        "relationship_name": "AccountPaymentProfiles",
+                        "relationship_field": "AccountId",
+                        "fields": [
+                            "Id",
+                            "Name",
+                            "PaymentMethodType",
+                            "Status",
+                        ],
+                        "filters": "",
+                        "children": [
+                            {
+                                "id": "billing_profile_contact",
+                                "type": "parent",
+                                "object_name": "Contact",
+                                "label": translate(
+                                    "complex_account.object_labels.billing_contact", language
+                                ),
+                                "relationship_name": "BillingContact",
+                                "fields": [
+                                    "Id",
+                                    "FirstName",
+                                    "LastName",
+                                    "Email",
+                                ],
+                                "children": [],
+                            }
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            "id": "account_service_template",
+            "name": translate("complex_account.templates.account_service_template.name", language),
+            "description": translate(
+                "complex_account.templates.account_service_template.description", language
+            ),
+            "config": {
+                "root_object": "Account",
+                "root_label": translate("complex_account.object_labels.account", language),
+                "root_fields": [
+                    "Name",
+                    "Type",
+                    "Owner.Name",
+                    "BillingPostalCode",
+                    "SLA",
+                ],
+                "filters": "",
+                "relationships": [
+                    {
+                        "id": "cases",
+                        "type": "child",
+                        "object_name": "Case",
+                        "label": translate("complex_account.object_labels.case", language),
+                        "relationship_name": "Cases",
+                        "relationship_field": "AccountId",
+                        "fields": [
+                            "Id",
+                            "CaseNumber",
+                            "Status",
+                            "Priority",
+                            "Subject",
+                        ],
+                        "filters": "",
+                        "children": [
+                            {
+                                "id": "case_contact",
+                                "type": "parent",
+                                "object_name": "Contact",
+                                "label": translate(
+                                    "complex_account.object_labels.case_contact", language
+                                ),
+                                "relationship_name": "Contact",
+                                "fields": ["Id", "FirstName", "LastName", "Email"],
+                                "children": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    ]
+    return render_template(
+        "complex_account.html",
+        orgs=orgs,
+        complex_templates=templates,
+    )
 
 
 @main_bp.route("/orgs")
@@ -360,6 +540,59 @@ def api_list_sobject_fields(object_name: str) -> Response:
         return jsonify({"error": str(exc)}), 400
 
     return jsonify(fields)
+
+
+@main_bp.route("/api/sobjects/<object_name>/describe", methods=["GET"])
+def api_describe_sobject(object_name: str) -> Response:
+    org_id = request.args.get("org_id")
+    if not org_id:
+        return jsonify({"error": "org_id is required"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    try:
+        description = describe_sobject_with_relationships(org, object_name)
+    except SalesforceError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(description)
+
+
+@main_bp.route("/api/complex-account/preview", methods=["POST"])
+def api_complex_account_preview() -> Response:
+    payload = request.get_json(force=True)
+    config_data = payload.get("config") or {}
+    try:
+        config = parse_complex_account_config(config_data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    soql = build_single_query(config)
+    return jsonify({"query": soql})
+
+
+@main_bp.route("/api/complex-account/run", methods=["POST"])
+def api_complex_account_run() -> Response:
+    payload = request.get_json(force=True)
+    org_id = payload.get("org_id")
+    if not org_id:
+        return jsonify({"error": "org_id is required"}), 400
+
+    org = storage.get(org_id)
+    if not org:
+        return jsonify({"error": "Unknown org"}), 404
+
+    config_data = payload.get("config") or {}
+    try:
+        config = parse_complex_account_config(config_data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    result = run_complex_account_query(org, config)
+    result["config"] = config.to_dict()
+    return jsonify(result)
 
 
 @main_bp.errorhandler(SalesforceError)

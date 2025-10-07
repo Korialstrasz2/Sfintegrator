@@ -178,6 +178,326 @@ body.theme-sci-fi {
   border-color: #0d6efd;
 }
 
+.complex-account-page .card + .card {
+  margin-top: 1.5rem;
+}
+
+.complex-account-configuration {
+  min-height: 160px;
+}
+
+.complex-account-configuration .configuration-tree {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 0;
+}
+
+.complex-account-configuration .configuration-tree li {
+  border-left: 2px solid rgba(13, 110, 253, 0.2);
+  margin-left: 1rem;
+  padding-left: 0.75rem;
+  margin-bottom: 0.75rem;
+  position: relative;
+}
+
+.complex-account-configuration .configuration-tree li::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0.6rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #0d6efd;
+}
+
+.complex-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.complex-template-card {
+  border: 1px solid rgba(13, 110, 253, 0.15);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(13, 110, 253, 0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.complex-template-card:hover {
+  border-color: rgba(13, 110, 253, 0.35);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+}
+
+.complex-template-card h3 {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.complex-template-card .badge {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.complex-account-results {
+  min-height: 200px;
+  border: 1px dashed rgba(13, 110, 253, 0.25);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(13, 110, 253, 0.02);
+}
+
+.complex-account-results .result-tree {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 0;
+}
+
+.complex-account-results .result-tree li {
+  margin-bottom: 0.5rem;
+}
+
+.complex-account-results .result-branch {
+  border-left: 2px solid rgba(13, 110, 253, 0.2);
+  padding-left: 0.75rem;
+  margin-left: 0.5rem;
+}
+
+.complex-account-results .result-label {
+  font-weight: 600;
+  color: var(--bs-body-color, #212529);
+}
+
+.complex-account-results .result-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  background-color: rgba(13, 110, 253, 0.1);
+  color: #0d6efd;
+  margin-right: 0.5rem;
+}
+
+.complex-account-results .result-metadata {
+  font-size: 0.75rem;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.wizard-field-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 992px) {
+  .wizard-field-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.wizard-field-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid rgba(13, 110, 253, 0.2);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  background-color: rgba(13, 110, 253, 0.03);
+}
+
+.wizard-field-list .wizard-field-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.wizard-field-list .wizard-field-item:hover {
+  background-color: rgba(13, 110, 253, 0.12);
+}
+
+.wizard-selected-tags {
+  min-height: 48px;
+  border: 1px dashed rgba(13, 110, 253, 0.35);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.wizard-selected-tags .badge {
+  background-color: #0d6efd;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.wizard-selected-tags .badge button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  line-height: 1;
+}
+
+.relationship-tree {
+  border: 1px solid rgba(13, 110, 253, 0.2);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(13, 110, 253, 0.03);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.relationship-tree .relationship-node {
+  border-left: 2px solid rgba(13, 110, 253, 0.2);
+  margin-left: 0.75rem;
+  padding-left: 0.75rem;
+  margin-bottom: 0.75rem;
+  position: relative;
+}
+
+.relationship-tree .relationship-node::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0.6rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #0d6efd;
+}
+
+.relationship-node .node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.relationship-option-list {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid rgba(13, 110, 253, 0.2);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+}
+
+.relationship-option-list .relationship-option {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.relationship-option-list .relationship-option:hover,
+.relationship-option-list .relationship-option.active {
+  background-color: rgba(13, 110, 253, 0.12);
+}
+
+.preview-area {
+  min-height: 120px;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  background-color: rgba(15, 23, 42, 0.04);
+}
+
+.wizard-summary {
+  border: 1px solid rgba(13, 110, 253, 0.2);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(13, 110, 253, 0.03);
+}
+
+.wizard-summary .summary-section + .summary-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(13, 110, 253, 0.2);
+}
+
+.wizard-summary ul {
+  margin-bottom: 0;
+}
+
+.wizard-summary li {
+  margin-bottom: 0.35rem;
+}
+
+.complex-wizard-stepper {
+  position: relative;
+  padding-bottom: 0.5rem;
+}
+
+.complex-wizard-progress {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: rgba(13, 110, 253, 0.2);
+}
+
+.complex-wizard-steps {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+}
+
+.complex-wizard-steps .wizard-step-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  text-align: center;
+}
+
+.wizard-step-indicator .circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(13, 110, 253, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: rgba(13, 110, 253, 0.8);
+  background-color: #ffffff;
+}
+
+.wizard-step-indicator.active .circle {
+  background-color: #0d6efd;
+  color: #ffffff;
+  border-color: #0d6efd;
+}
+
+.wizard-step-indicator.completed .circle {
+  background-color: rgba(13, 110, 253, 0.12);
+  color: #0d6efd;
+  border-color: rgba(13, 110, 253, 0.45);
+}
+
+.wizard-step-indicator span {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.relationship-filter {
+  font-size: 0.8rem;
+  color: rgba(15, 23, 42, 0.65);
+}
+
+.relationship-node .badge {
+  background-color: rgba(13, 110, 253, 0.15);
+  color: #0d6efd;
+}
+
 .field-suggestions-bar {
   border: 1px solid rgba(13, 110, 253, 0.2);
   background-color: rgba(13, 110, 253, 0.05);
