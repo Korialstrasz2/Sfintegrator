@@ -1,38 +1,180 @@
 {% extends 'base.html' %}
+{% set complex_pack = (language_pack.get('index', {}).get('complex', {})) %}
+{% set complex_templates = complex_pack.get('templates', []) %}
+{% set complex_templates_section = complex_pack.get('templates_section', {}) %}
+{% set complex_tasks_section = complex_pack.get('tasks', {}) %}
+{% set complex_tasks = complex_tasks_section.get('items', []) %}
+{% set complex_steps = complex_pack.get('modal', {}).get('steps', []) %}
 {% block content %}
 <div class="row g-4 align-items-start query-layout">
   <div class="col-12 col-xl-9 query-main">
     <div class="card shadow-sm h-100">
+      <div class="card-header border-bottom-0 pb-0">
+        <ul class="nav nav-pills card-header-pills" id="query-main-tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link active"
+              id="query-tab-simple"
+              data-bs-toggle="tab"
+              data-bs-target="#query-main-simple"
+              type="button"
+              role="tab"
+              aria-controls="query-main-simple"
+              aria-selected="true"
+            >
+              {{ t('index.query.title') }}
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link"
+              id="query-tab-complex"
+              data-bs-toggle="tab"
+              data-bs-target="#query-main-complex"
+              type="button"
+              role="tab"
+              aria-controls="query-main-complex"
+              aria-selected="false"
+            >
+              {{ complex_pack.get('tab_label', 'Get Complex Data') }}
+            </button>
+          </li>
+        </ul>
+      </div>
       <div class="card-body d-flex flex-column">
-        <h5 class="card-title">{{ t('index.query.title') }}</h5>
-        <form id="query-form" class="mb-4">
-          <div class="mb-3">
-            <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
-            <textarea id="soql-query" class="form-control" rows="5">{{ t('index.query.soql_placeholder') }}</textarea>
-          </div>
-          <div
-            id="query-field-suggestions"
-            class="field-suggestions-bar d-none"
-            data-label-title="{{ t('index.query.suggestions.title') }}"
-            data-label-empty="{{ t('index.query.suggestions.empty') }}"
-            data-label-field-exists="{{ t('index.query.suggestions.field_exists_toast') }}"
-          >
-            <div class="d-flex flex-wrap align-items-center gap-2">
-              <span class="small text-uppercase fw-semibold text-muted suggestions-title"></span>
-              <div id="query-field-suggestions-list" class="d-flex flex-wrap gap-2"></div>
+        <div class="tab-content flex-grow-1" id="query-main-tabs-content">
+          <div class="tab-pane fade show active" id="query-main-simple" role="tabpanel" aria-labelledby="query-tab-simple">
+            <div class="d-flex flex-column h-100">
+              <h5 class="card-title">{{ t('index.query.title') }}</h5>
+              <form id="query-form" class="mb-4">
+                <div class="mb-3">
+                  <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
+                  <textarea id="soql-query" class="form-control" rows="5">{{ t('index.query.soql_placeholder') }}</textarea>
+                </div>
+                <div
+                  id="query-field-suggestions"
+                  class="field-suggestions-bar d-none"
+                  data-label-title="{{ t('index.query.suggestions.title') }}"
+                  data-label-empty="{{ t('index.query.suggestions.empty') }}"
+                  data-label-field-exists="{{ t('index.query.suggestions.field_exists_toast') }}"
+                >
+                  <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="small text-uppercase fw-semibold text-muted suggestions-title"></span>
+                    <div id="query-field-suggestions-list" class="d-flex flex-wrap gap-2"></div>
+                  </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <button type="button" id="add-limit" class="btn btn-outline-secondary btn-sm">
+                    {{ t('index.query.helpers.add_limit') }}
+                  </button>
+                  <button type="button" id="add-order-by" class="btn btn-outline-secondary btn-sm">
+                    {{ t('index.query.helpers.add_order_by') }}
+                  </button>
+                </div>
+                <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
+              </form>
+              <div id="query-result" class="table-responsive"></div>
             </div>
           </div>
-          <div class="d-flex flex-wrap gap-2 mb-3">
-            <button type="button" id="add-limit" class="btn btn-outline-secondary btn-sm">
-              {{ t('index.query.helpers.add_limit') }}
-            </button>
-            <button type="button" id="add-order-by" class="btn btn-outline-secondary btn-sm">
-              {{ t('index.query.helpers.add_order_by') }}
-            </button>
+          <div
+            class="tab-pane fade"
+            id="query-main-complex"
+            role="tabpanel"
+            aria-labelledby="query-tab-complex"
+            data-templates='{{ complex_templates | tojson | safe }}'
+            data-tasks='{{ complex_tasks | tojson | safe }}'
+            data-step-labels='{{ complex_steps | tojson | safe }}'
+            data-launch-label='{{ complex_pack.get('launch_button', '') | e }}'
+            data-resume-label='{{ complex_pack.get('resume_button', '') | e }}'
+            data-resume-disabled='{{ complex_pack.get('resume_disabled', '') | e }}'
+            data-reset-label='{{ complex_pack.get('reset_button', '') | e }}'
+            data-reset-confirm='{{ complex_pack.get('reset_confirm', '') | e }}'
+            data-last-title='{{ complex_pack.get('last_query', {}).get('title', '') | e }}'
+            data-last-empty='{{ complex_pack.get('last_query', {}).get('empty', '') | e }}'
+            data-last-helper='{{ complex_pack.get('last_query', {}).get('helper', '') | e }}'
+            data-insert-latest='{{ complex_pack.get('last_query', {}).get('insert_button', '') | e }}'
+            data-templates-title='{{ complex_templates_section.get('title', '') | e }}'
+            data-templates-description='{{ complex_templates_section.get('description', '') | e }}'
+            data-tasks-title='{{ complex_tasks_section.get('title', '') | e }}'
+            data-tasks-description='{{ complex_tasks_section.get('description', '') | e }}'
+            data-modal-title='{{ complex_pack.get('modal', {}).get('title', '') | e }}'
+            data-modal-description='{{ complex_pack.get('modal', {}).get('description', '') | e }}'
+            data-preview-label='{{ complex_pack.get('modal', {}).get('preview_label', '') | e }}'
+            data-preview-helper='{{ complex_pack.get('modal', {}).get('preview_helper', '') | e }}'
+            data-data-title='{{ complex_pack.get('modal', {}).get('data_title', '') | e }}'
+            data-data-empty='{{ complex_pack.get('modal', {}).get('data_empty', '') | e }}'
+            data-run-button='{{ complex_pack.get('modal', {}).get('run_button', '') | e }}'
+            data-insert-button='{{ complex_pack.get('modal', {}).get('insert_button', '') | e }}'
+            data-back-button='{{ complex_pack.get('modal', {}).get('back_button', '') | e }}'
+            data-next-button='{{ complex_pack.get('modal', {}).get('next_button', '') | e }}'
+            data-done-button='{{ complex_pack.get('modal', {}).get('done_button', '') | e }}'
+            data-copy-button='{{ complex_pack.get('modal', {}).get('copy_button', '') | e }}'
+            data-close-button='{{ complex_pack.get('modal', {}).get('close_button', '') | e }}'
+            data-refresh-button='{{ complex_pack.get('modal', {}).get('refresh_button', '') | e }}'
+          >
+            <div class="complex-tab-section d-flex flex-column gap-4" id="complex-data">
+              <div class="complex-tab-header">
+                <h5 class="card-title">{{ complex_pack.get('title', 'Get Complex Data') }}</h5>
+                {% if complex_pack.get('description') %}
+                  <p class="text-muted mb-3">{{ complex_pack.get('description') }}</p>
+                {% endif %}
+                <div class="d-flex flex-wrap gap-2">
+                  <button type="button" class="btn btn-primary" id="complex-wizard-launch">
+                    {{ complex_pack.get('launch_button', 'Launch wizard') }}
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary" id="complex-wizard-resume" disabled>
+                    {{ complex_pack.get('resume_button', 'Resume last setup') }}
+                  </button>
+                  <button type="button" class="btn btn-outline-danger" id="complex-wizard-reset">
+                    {{ complex_pack.get('reset_button', 'Reset wizard') }}
+                  </button>
+                </div>
+              </div>
+              <div class="row g-4">
+                <div class="col-12 col-lg-7">
+                  <div class="card shadow-sm complex-preview-card h-100">
+                    <div class="card-body">
+                      <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="card-title mb-0" id="complex-wizard-last-title">
+                          {{ complex_pack.get('last_query', {}).get('title', 'Latest generated query') }}
+                        </h6>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="complex-wizard-insert-latest" disabled>
+                          {{ complex_pack.get('last_query', {}).get('insert_button', 'Insert into editor') }}
+                        </button>
+                      </div>
+                      <pre id="complex-wizard-last-query" class="complex-wizard-last-query small text-break mb-0">{{ complex_pack.get('last_query', {}).get('empty', '') }}</pre>
+                      {% if complex_pack.get('last_query', {}).get('helper') %}
+                        <p class="text-muted small mt-2" id="complex-wizard-last-helper">{{ complex_pack.get('last_query', {}).get('helper') }}</p>
+                      {% else %}
+                        <p class="text-muted small mt-2 d-none" id="complex-wizard-last-helper"></p>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-lg-5">
+                  <div class="card shadow-sm mb-3 complex-templates-card">
+                    <div class="card-body">
+                      <h6 class="card-title mb-2">{{ complex_templates_section.get('title', 'Templates') }}</h6>
+                      {% if complex_templates_section.get('description') %}
+                        <p class="text-muted small">{{ complex_templates_section.get('description') }}</p>
+                      {% endif %}
+                      <div id="complex-wizard-templates" class="list-group complex-preset-list"></div>
+                    </div>
+                  </div>
+                  <div class="card shadow-sm complex-tasks-card">
+                    <div class="card-body">
+                      <h6 class="card-title mb-2">{{ complex_tasks_section.get('title', 'Guided tasks') }}</h6>
+                      {% if complex_tasks_section.get('description') %}
+                        <p class="text-muted small">{{ complex_tasks_section.get('description') }}</p>
+                      {% endif %}
+                      <div id="complex-wizard-tasks" class="list-group complex-preset-list"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
-        </form>
-        <div id="query-result" class="table-responsive"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -233,6 +375,87 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div
+  class="modal fade"
+  id="complex-data-modal"
+  tabindex="-1"
+  aria-labelledby="complex-data-modal-label"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="complex-data-modal-label">
+          {{ complex_pack.get('modal', {}).get('title', 'Complex data wizard') }}
+        </h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="{{ complex_pack.get('modal', {}).get('close_button', 'Close') }}"
+        ></button>
+      </div>
+      <div class="modal-body">
+        {% if complex_pack.get('modal', {}).get('description') %}
+          <p class="text-muted">{{ complex_pack.get('modal', {}).get('description') }}</p>
+        {% endif %}
+        <div id="complex-wizard-stepper" class="complex-wizard-stepper mb-4"></div>
+        <div id="complex-wizard-content" class="complex-wizard-content"></div>
+        <div class="card shadow-sm mt-4 complex-wizard-preview-card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span id="complex-wizard-preview-label">
+              {{ complex_pack.get('modal', {}).get('preview_label', 'Preview query') }}
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="complex-wizard-copy">
+              {{ complex_pack.get('modal', {}).get('copy_button', 'Copy query') }}
+            </button>
+          </div>
+          <div class="card-body">
+            <pre id="complex-wizard-preview-query" class="mb-0 small text-break">
+{{- complex_pack.get('last_query', {}).get('empty', '') -}}
+            </pre>
+            {% if complex_pack.get('modal', {}).get('preview_helper') %}
+              <p id="complex-wizard-preview-helper" class="text-muted small mt-2">
+                {{ complex_pack.get('modal', {}).get('preview_helper') }}
+              </p>
+            {% else %}
+              <p id="complex-wizard-preview-helper" class="text-muted small mt-2 d-none"></p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="complex-wizard-data mt-4">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0" id="complex-wizard-data-title">
+              {{ complex_pack.get('modal', {}).get('data_title', 'Data preview') }}
+            </h6>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="complex-wizard-refresh" disabled>
+              {{ complex_pack.get('modal', {}).get('refresh_button', 'Refresh') }}
+            </button>
+          </div>
+          <div id="complex-wizard-data-preview" class="complex-wizard-data-preview border rounded p-3 text-muted small">
+            {{ complex_pack.get('modal', {}).get('data_empty', '') }}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer align-items-center">
+        <div class="d-flex gap-2 me-auto">
+          <button type="button" class="btn btn-outline-secondary" id="complex-wizard-back">
+            {{ complex_pack.get('modal', {}).get('back_button', 'Back') }}
+          </button>
+          <button type="button" class="btn btn-primary" id="complex-wizard-next">
+            {{ complex_pack.get('modal', {}).get('next_button', 'Next') }}
+          </button>
+        </div>
+        <button type="button" class="btn btn-outline-primary" id="complex-wizard-insert">
+          {{ complex_pack.get('modal', {}).get('insert_button', 'Insert into editor') }}
+        </button>
+        <button type="button" class="btn btn-success" id="complex-wizard-run">
+          {{ complex_pack.get('modal', {}).get('run_button', 'Run query') }}
+        </button>
       </div>
     </div>
   </div>
