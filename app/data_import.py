@@ -15,16 +15,16 @@ DATA_IMPORT_SESSION_KEY = "data_import_session_id"
 
 DATA_IMPORT_OBJECTS: List[Dict[str, str]] = [
     {"key": "Account", "label": "Account"},
-    {"key": "BillingProfile", "label": "Billing Profile"},
+    {"key": "BillingProfile__c", "label": "Billing Profile"},
     {"key": "Contact", "label": "Contact"},
     {"key": "Contract", "label": "Contract"},
-    {"key": "AccountContactRelationship", "label": "Account Contact Relationship"},
+    {"key": "AccountContactRelation", "label": "Account Contact Relation"},
     {"key": "Individual", "label": "Individual"},
     {"key": "ContactPointPhone", "label": "Contact Point Phone"},
     {"key": "ContactPointEmail", "label": "Contact Point Email"},
     {"key": "Case", "label": "Case"},
     {"key": "Order", "label": "Order"},
-    {"key": "Sale", "label": "Sale"},
+    {"key": "Sale__c", "label": "Sale"},
 ]
 
 _OBJECT_LOOKUP = {item["key"]: item for item in DATA_IMPORT_OBJECTS}
