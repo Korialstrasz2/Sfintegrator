@@ -7,6 +7,8 @@ A lightweight Flask application to manage Salesforce org connections via OAuth 2
 - Configure multiple Salesforce orgs (production, sandbox, or custom domains).
 - Perform OAuth 2.0 flows to connect orgs and store tokens securely on disk.
 - Run SOQL queries against connected orgs directly from the UI.
+- Build complex SOQL with the interactive query composer featuring templates,
+  autocomplete, and aggregate/relationship helpers.
 - Built-in guide documenting Salesforce and application configuration steps.
 
 ## Getting started
@@ -46,3 +48,20 @@ Set `FLASK_SECRET_KEY` to override the default secret key in production deployme
 ## Data storage
 
 Org definitions and OAuth tokens are stored in `data/orgs.json`. Treat this file as sensitive because it may contain refresh tokens.
+
+## Query composer
+
+Open the **Compose query** modal next to the Run query button to assemble SOQL
+without memorizing every clause. The builder supports:
+
+- Selecting base objects and fields with autocomplete powered by Salesforce
+  metadata.
+- Switching between basic, aggregate, relationship, and TYPEOF modes.
+- Adding WHERE, HAVING, GROUP BY, ORDER BY, and LIMIT/OFFSET clauses through
+  dedicated controls.
+- Creating inner (parent-to-child) subqueries with relationship helpers.
+- Starting from curated templates for popular reporting scenarios.
+- Copying the generated SOQL back into the editor with a single click.
+
+The preview panel updates live so you can validate the generated query before
+inserting it into the main editor.
