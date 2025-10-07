@@ -1,0 +1,264 @@
+{% extends 'base.html' %}
+{% block content %}
+<div id="complex-account-root"
+  class="complex-account-page"
+  data-templates='{{ complex_templates | tojson | safe }}'
+  data-label-preview="{{ t('complex_account.wizard.preview_label') }}"
+  data-label-step="{{ t('complex_account.wizard.step_label') }}"
+  data-label-of="{{ t('complex_account.wizard.step_of') }}"
+  data-label-empty-config="{{ t('complex_account.configuration.empty') }}"
+  data-label-run="{{ t('complex_account.run.button') }}"
+  data-label-run-disabled="{{ t('complex_account.run.disabled_tooltip') }}"
+  data-label-last-query="{{ t('complex_account.run.last_query') }}"
+  data-label-records="{{ t('complex_account.run.records_returned') }}"
+  data-label-done="{{ t('complex_account.run.query_done') }}"
+  data-label-not-done="{{ t('complex_account.run.query_not_done') }}"
+  data-label-no-records="{{ t('complex_account.run.no_records') }}"
+  data-label-expand-all="{{ t('complex_account.results.expand_all') }}"
+  data-label-collapse-all="{{ t('complex_account.results.collapse_all') }}"
+  data-label-template-badges="{{ t('complex_account.templates.badge') }}"
+  data-label-add-child="{{ t('complex_account.wizard.add_child') }}"
+  data-label-add-parent="{{ t('complex_account.wizard.add_parent') }}"
+  data-label-configure-fields="{{ t('complex_account.wizard.configure_fields') }}"
+  data-label-configure-filters="{{ t('complex_account.wizard.configure_filters') }}"
+  data-label-remove-node="{{ t('complex_account.wizard.remove_relationship') }}"
+  data-label-empty-fields="{{ t('complex_account.wizard.no_fields_selected') }}"
+>
+  <div class="row g-4 align-items-start">
+    <div class="col-12 col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+            <div>
+              <h1 class="h4 mb-1">{{ t('complex_account.title') }}</h1>
+              <p class="text-muted mb-0">{{ t('complex_account.subtitle') }}</p>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-primary" id="complex-account-start">
+                {{ t('complex_account.actions.start_from_scratch') }}
+              </button>
+              <button type="button" class="btn btn-outline-secondary" id="complex-account-load-template">
+                {{ t('complex_account.actions.choose_template') }}
+              </button>
+            </div>
+          </div>
+
+          <hr class="my-4" />
+
+          <div id="complex-account-configuration" class="complex-account-configuration">
+            <div class="text-center py-5 text-muted">
+              <p class="mb-1">{{ t('complex_account.configuration.empty') }}</p>
+              <p class="small mb-0">{{ t('complex_account.configuration.empty_hint') }}</p>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mt-4">
+            <div>
+              <span class="text-muted small d-block">{{ t('complex_account.run.last_query') }}</span>
+              <code class="d-block small text-break" id="complex-account-last-query"></code>
+            </div>
+            <button type="button" class="btn btn-success" id="complex-account-run" disabled>
+              {{ t('complex_account.run.button') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mt-4">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h6 mb-0">{{ t('complex_account.results.title') }}</h2>
+            <div class="btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-secondary" id="complex-account-expand-all">
+                {{ t('complex_account.results.expand_all') }}
+              </button>
+              <button type="button" class="btn btn-outline-secondary" id="complex-account-collapse-all">
+                {{ t('complex_account.results.collapse_all') }}
+              </button>
+            </div>
+          </div>
+          <div id="complex-account-results" class="complex-account-results text-muted">
+            <p class="mb-0">{{ t('complex_account.run.no_records') }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-lg-4">
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <h2 class="h6">{{ t('complex_account.org_selector.title') }}</h2>
+          <p class="text-muted small">{{ t('complex_account.org_selector.description') }}</p>
+          <input id="selected-org" class="form-control mb-3" type="text" placeholder="{{ t('complex_account.org_selector.placeholder') }}" readonly />
+          <div id="org-list">
+            {% if orgs %}
+              <div class="list-group">
+                {% for org in orgs %}
+                  <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center org-select" data-org="{{ org.id }}">
+                    <span>
+                      <strong>{{ org.label }}</strong>
+                      <span class="d-block small text-muted">{{ org.environment }}</span>
+                    </span>
+                    {% if org.access_token %}
+                      <span class="badge bg-success">{{ t('index.select_org.connected_badge') }}</span>
+                    {% else %}
+                      <span class="badge bg-secondary">{{ t('index.select_org.not_connected_badge') }}</span>
+                    {% endif %}
+                  </button>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="text-muted small mb-0">{{ t('index.select_org.empty') }}</p>
+              <a class="btn btn-outline-primary btn-sm mt-2" href="{{ url_for('main.manage_orgs') }}">{{ t('index.select_org.manage_button') }}</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h6">{{ t('complex_account.templates.title') }}</h2>
+          <p class="text-muted small">{{ t('complex_account.templates.subtitle') }}</p>
+          <div id="complex-account-template-list" class="complex-template-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="complexWizardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="complex-wizard-title"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ t('complex_account.wizard.close') }}"></button>
+      </div>
+      <div class="modal-body">
+        <div class="complex-wizard-stepper mb-3">
+          <div class="complex-wizard-progress" id="complex-wizard-progress"></div>
+          <div class="complex-wizard-steps" id="complex-wizard-steps"></div>
+        </div>
+        <div id="complex-wizard-content">
+          <div class="wizard-step" data-step="1">
+            <h3 class="h5">{{ t('complex_account.wizard.steps.base.title') }}</h3>
+            <p class="text-muted">{{ t('complex_account.wizard.steps.base.description') }}</p>
+            <div class="row g-3 mt-3">
+              <div class="col-12 col-lg-4">
+                <label class="form-label" for="complex-root-object">{{ t('complex_account.wizard.steps.base.object_label') }}</label>
+                <input type="text" id="complex-root-object" class="form-control" value="Account" readonly />
+              </div>
+              <div class="col-12 col-lg-8">
+                <label class="form-label" for="complex-root-filters">{{ t('complex_account.wizard.steps.base.filters_label') }}</label>
+                <input type="text" id="complex-root-filters" class="form-control" placeholder="{{ t('complex_account.wizard.steps.base.filters_placeholder') }}" />
+              </div>
+            </div>
+            <div class="mt-4">
+              <label class="form-label" for="complex-root-field-search">{{ t('complex_account.wizard.steps.base.fields_label') }}</label>
+              <input type="search" id="complex-root-field-search" class="form-control" placeholder="{{ t('complex_account.wizard.steps.base.field_search_placeholder') }}" />
+              <div class="wizard-field-layout mt-3">
+                <div>
+                  <h4 class="h6">{{ t('complex_account.wizard.steps.base.available_fields') }}</h4>
+                  <div id="complex-root-field-list" class="wizard-field-list"></div>
+                </div>
+                <div>
+                  <h4 class="h6">{{ t('complex_account.wizard.steps.base.selected_fields') }}</h4>
+                  <div id="complex-root-field-selected" class="wizard-selected-tags"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wizard-step d-none" data-step="2">
+            <h3 class="h5">{{ t('complex_account.wizard.steps.relationships.title') }}</h3>
+            <p class="text-muted">{{ t('complex_account.wizard.steps.relationships.description') }}</p>
+            <div class="relationship-toolbar d-flex flex-wrap gap-2 mt-3">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-action="add-child">
+                {{ t('complex_account.wizard.add_child') }}
+              </button>
+              <button type="button" class="btn btn-outline-primary btn-sm" data-action="add-parent">
+                {{ t('complex_account.wizard.add_parent') }}
+              </button>
+            </div>
+            <div id="complex-relationship-tree" class="relationship-tree mt-3"></div>
+          </div>
+          <div class="wizard-step d-none" data-step="3">
+            <h3 class="h5">{{ t('complex_account.wizard.steps.review.title') }}</h3>
+            <p class="text-muted">{{ t('complex_account.wizard.steps.review.description') }}</p>
+            <div id="complex-wizard-summary" class="wizard-summary"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer flex-column align-items-stretch">
+        <div class="w-100">
+          <label class="form-label small text-muted mb-1" for="complex-wizard-preview">{{ t('complex_account.wizard.preview_label') }}</label>
+          <pre class="form-control preview-area" id="complex-wizard-preview" readonly></pre>
+        </div>
+        <div class="d-flex justify-content-between w-100 mt-3">
+          <button type="button" class="btn btn-outline-secondary" id="complex-wizard-back">{{ t('complex_account.wizard.back') }}</button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t('complex_account.wizard.cancel') }}</button>
+            <button type="button" class="btn btn-primary" id="complex-wizard-next">{{ t('complex_account.wizard.next') }}</button>
+            <button type="button" class="btn btn-success d-none" id="complex-wizard-finish">{{ t('complex_account.wizard.finish') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="complexFieldModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="complex-field-modal-title"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ t('complex_account.wizard.close') }}"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="complex-field-search">{{ t('complex_account.wizard.field_search_label') }}</label>
+        <input type="search" id="complex-field-search" class="form-control" placeholder="{{ t('complex_account.wizard.field_search_placeholder') }}" />
+        <div class="wizard-field-layout mt-3">
+          <div>
+            <h4 class="h6">{{ t('complex_account.wizard.available_fields') }}</h4>
+            <div id="complex-field-list" class="wizard-field-list"></div>
+          </div>
+          <div>
+            <h4 class="h6">{{ t('complex_account.wizard.selected_fields') }}</h4>
+            <div id="complex-field-selected" class="wizard-selected-tags"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t('complex_account.wizard.close') }}</button>
+        <button type="button" class="btn btn-primary" id="complex-field-apply">{{ t('complex_account.wizard.apply_fields') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="complexRelationshipModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ t('complex_account.wizard.relationship_modal.title') }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ t('complex_account.wizard.close') }}"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label" for="complex-relationship-type">{{ t('complex_account.wizard.relationship_modal.type_label') }}</label>
+          <select id="complex-relationship-type" class="form-select">
+            <option value="child">{{ t('complex_account.wizard.relationship_modal.child_option') }}</option>
+            <option value="parent">{{ t('complex_account.wizard.relationship_modal.parent_option') }}</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="complex-relationship-search">{{ t('complex_account.wizard.relationship_modal.search_label') }}</label>
+          <input type="search" id="complex-relationship-search" class="form-control" placeholder="{{ t('complex_account.wizard.relationship_modal.search_placeholder') }}" />
+        </div>
+        <div id="complex-relationship-options" class="relationship-option-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t('complex_account.wizard.cancel') }}</button>
+        <button type="button" class="btn btn-primary" id="complex-relationship-apply">{{ t('complex_account.wizard.add_relationship') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
