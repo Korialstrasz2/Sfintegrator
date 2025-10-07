@@ -4,7 +4,7 @@ import base64
 import hashlib
 import logging
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -119,46 +119,21 @@ def list_sobjects(org: OrgConfig) -> List[Dict[str, str]]:
     return sobjects
 
 
-def describe_sobject(org: OrgConfig, object_name: str) -> Dict[str, Any]:
+def describe_sobject(org: OrgConfig, object_name: str) -> List[Dict[str, str]]:
     path = f"/services/data/v57.0/sobjects/{object_name}" if object_name else ""
     if not path:
         raise SalesforceError("Missing object name")
     data, _ = _authorized_get(org, f"{path}/describe")
-    describe: Dict[str, Any] = {
-        "name": data.get("name", object_name),
-        "label": data.get("label", object_name),
-        "fields": [],
-        "childRelationships": [],
-    }
-
+    fields = []
     for field in data.get("fields", []):
-        describe["fields"].append(
+        fields.append(
             {
                 "name": field.get("name", ""),
                 "label": field.get("label", ""),
                 "type": field.get("type", ""),
-                "relationshipName": field.get("relationshipName"),
-                "referenceTo": [ref for ref in field.get("referenceTo", []) if ref],
-                "calculated": field.get("calculated", False),
-                "filterable": field.get("filterable", False),
-                "sortable": field.get("sortable", False),
             }
         )
-
-    for relationship in data.get("childRelationships", []):
-        describe["childRelationships"].append(
-            {
-                "relationshipName": relationship.get("relationshipName"),
-                "childSObject": relationship.get("childSObject"),
-                "field": relationship.get("field"),
-                "junctionIdListName": relationship.get("junctionIdListName"),
-                "junctionReferenceTo": [
-                    ref for ref in relationship.get("junctionReferenceTo", []) if ref
-                ],
-            }
-        )
-
-    return describe
+    return fields
 
 
 def serialize_org(org: OrgConfig) -> Dict[str, Optional[str]]:
