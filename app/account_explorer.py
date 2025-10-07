@@ -23,16 +23,16 @@ CONFIG_FILE = DATA_DIR / "account_explorer_config.json"
 RESULTS_DIR = DATA_DIR / "account_explorer_results"
 
 CONNECTED_OBJECTS: List[Dict[str, str]] = [
-    {"key": "BillingProfile", "label": "Billing Profile"},
+    {"key": "BillingProfile__c", "label": "Billing Profile"},
     {"key": "Contact", "label": "Contact"},
     {"key": "Contract", "label": "Contract"},
-    {"key": "AccountContactRelationship", "label": "Account Contact Relationship"},
+    {"key": "AccountContactRelation", "label": "Account Contact Relation"},
     {"key": "Individual", "label": "Individual"},
     {"key": "ContactPointPhone", "label": "Contact Point Phone"},
     {"key": "ContactPointEmail", "label": "Contact Point Email"},
     {"key": "Case", "label": "Case"},
     {"key": "Order", "label": "Order"},
-    {"key": "Sale", "label": "Sale"},
+    {"key": "Sale__c", "label": "Sale"},
 ]
 
 # Definition of the query requirements for each object.
@@ -42,10 +42,10 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "required_fields": [],
         "filter_field": "Id",
     },
-    "BillingProfile": {
+    "BillingProfile__c": {
         "label": "Billing Profile",
-        "required_fields": ["AccountId"],
-        "filter_field": "AccountId",
+        "required_fields": ["Account__c"],
+        "filter_field": "Account__c",
     },
     "Contact": {
         "label": "Contact",
@@ -57,8 +57,8 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "required_fields": ["AccountId"],
         "filter_field": "AccountId",
     },
-    "AccountContactRelationship": {
-        "label": "Account Contact Relationship",
+    "AccountContactRelation": {
+        "label": "Account Contact Relation",
         "required_fields": ["AccountId", "ContactId"],
         "filter_field": "AccountId",
     },
@@ -72,10 +72,10 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "required_fields": ["AccountId"],
         "filter_field": "AccountId",
     },
-    "Sale": {
+    "Sale__c": {
         "label": "Sale",
-        "required_fields": ["AccountId"],
-        "filter_field": "AccountId",
+        "required_fields": ["Account__c"],
+        "filter_field": "Account__c",
     },
     "Individual": {
         "label": "Individual",
@@ -96,16 +96,16 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
 
 _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "Account": ["Name", "Type", "Industry", "BillingCity", "BillingCountry"],
-    "BillingProfile": ["Name", "Status", "BillingFrequency", "BillingType", "Primary"],
+    "BillingProfile__c": ["Name", "OwnerId", "CreatedDate", "LastModifiedDate", "SystemModstamp"],
     "Contact": ["FirstName", "LastName", "Email", "Phone", "Title"],
     "Contract": ["ContractNumber", "Status", "StartDate", "EndDate", "OwnerId"],
-    "AccountContactRelationship": ["RelationshipRole", "IsActive", "IsDirect", "IsMain", "ContactId"],
+    "AccountContactRelation": ["Roles", "IsActive", "IsDirect", "IsMain", "ContactId"],
     "Case": ["CaseNumber", "Status", "Priority", "Origin", "Subject"],
     "Order": ["OrderNumber", "Status", "EffectiveDate", "TotalAmount", "OwnerId"],
-    "Sale": ["Name", "Stage", "CloseDate", "Amount", "OwnerId"],
-    "Individual": ["FirstName", "LastName", "Email", "HasOptedOutTracking", "HasOptedOutProfiling"],
-    "ContactPointPhone": ["PhoneNumber", "Type", "IsPrimary", "UsageType", "Status"],
-    "ContactPointEmail": ["EmailAddress", "Type", "IsPrimary", "UsageType", "Status"],
+    "Sale__c": ["Name", "OwnerId", "CreatedDate", "LastModifiedDate", "SystemModstamp"],
+    "Individual": ["FirstName", "LastName", "MiddleName", "HasOptedOutTracking", "HasOptedOutProfiling"],
+    "ContactPointPhone": ["PhoneNumber", "ParentId", "IsPrimary", "UsageType", "Status"],
+    "ContactPointEmail": ["EmailAddress", "ParentId", "IsPrimary", "UsageType", "Status"],
 }
 
 
@@ -427,15 +427,27 @@ def _aggregate_individuals_by_account(
     return account_to_individuals
 
 
-def _aggregate_contact_points(
+def _aggregate_contact_points_by_account(
     contact_points: Sequence[Dict[str, object]],
+    contacts_by_id: MutableMapping[str, Dict[str, object]],
+    individual_to_accounts: MutableMapping[str, Set[str]],
 ) -> MutableMapping[str, List[Dict[str, object]]]:
     mapping: MutableMapping[str, List[Dict[str, object]]] = {}
     for record in contact_points:
         parent_id = record.get("ParentId")
         if not parent_id:
             continue
-        mapping.setdefault(str(parent_id), []).append(record)
+        parent_key = str(parent_id)
+        account_ids: Set[str] = set()
+        contact_record = contacts_by_id.get(parent_key)
+        if contact_record:
+            account_id = contact_record.get("AccountId")
+            if account_id:
+                account_ids.add(str(account_id))
+        for account_id in individual_to_accounts.get(parent_key, set()):
+            account_ids.add(account_id)
+        for account_id in account_ids:
+            mapping.setdefault(account_id, []).append(record)
     return mapping
 
 
@@ -463,13 +475,13 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
 
     # Query objects linked directly to accounts
     direct_objects = [
-        "BillingProfile",
+        "BillingProfile__c",
         "Contract",
         "Contact",
-        "AccountContactRelationship",
+        "AccountContactRelation",
         "Case",
         "Order",
-        "Sale",
+        "Sale__c",
     ]
     for object_key in direct_objects:
         definition = _OBJECT_DEFINITIONS[object_key]
@@ -487,6 +499,16 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         results[object_key] = records
 
     contacts = results.get("Contact", [])
+    contacts_by_id: Dict[str, Dict[str, object]] = {}
+    contact_ids: List[str] = []
+    for contact in contacts:
+        contact_id = contact.get("Id")
+        if not contact_id:
+            continue
+        contact_id_str = str(contact_id)
+        contacts_by_id[contact_id_str] = contact
+        if contact_id_str not in contact_ids:
+            contact_ids.append(contact_id_str)
     individuals_config = _build_query_fields("Individual", config)
     individual_query_fields, individual_display_fields = individuals_config
     individual_ids: List[str] = []
@@ -507,14 +529,25 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                     individual_records[str(record_id)] = record
     results["Individual"] = list(individual_records.values())
 
-    # Contact points for individuals
+    individual_by_account = _aggregate_individuals_by_account(contacts, individual_records)
+    contact_by_account = _map_records_by_field(contacts, "AccountId")
+    individual_to_accounts: Dict[str, Set[str]] = {}
+    for account_id, ids in individual_by_account.items():
+        for individual_id in ids:
+            individual_to_accounts.setdefault(individual_id, set()).add(account_id)
+
+    # Contact points for individuals and contacts
     contact_point_objects = ["ContactPointPhone", "ContactPointEmail"]
-    contact_point_mappings: Dict[str, List[Dict[str, object]]] = {}
+    contact_point_account_mappings: Dict[str, Dict[str, List[Dict[str, object]]]] = {}
+    parent_ids_for_contact_points: List[str] = []
+    for identifier in individual_ids + contact_ids:
+        if identifier not in parent_ids_for_contact_points:
+            parent_ids_for_contact_points.append(identifier)
     for object_key in contact_point_objects:
-        query_fields, display_fields = _build_query_fields(object_key, config)
+        query_fields, _ = _build_query_fields(object_key, config)
         records: List[Dict[str, object]] = []
-        if individual_ids:
-            for chunk in _chunk(individual_ids, 100):
+        if parent_ids_for_contact_points:
+            for chunk in _chunk(parent_ids_for_contact_points, 100):
                 if object_key in warnings:
                     break
                 soql = (
@@ -523,10 +556,9 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 records.extend(data.get("records", []))
         results[object_key] = records
-        contact_point_mappings[object_key] = _aggregate_contact_points(records)
-
-    contact_by_account = _map_records_by_field(contacts, "AccountId")
-    individual_by_account = _aggregate_individuals_by_account(contacts, individual_records)
+        contact_point_account_mappings[object_key] = _aggregate_contact_points_by_account(
+            records, contacts_by_id, individual_to_accounts
+        )
 
     generated_at = datetime.now(timezone.utc).isoformat()
     explorer_data: Dict[str, object] = {
@@ -557,7 +589,14 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
             related_records: List[Dict[str, object]]
             if key == "Contact":
                 related_records = contact_by_account.get(account_id, [])
-            elif key in ("BillingProfile", "Contract", "AccountContactRelationship", "Case", "Order", "Sale"):
+            elif key in (
+                "BillingProfile__c",
+                "Contract",
+                "AccountContactRelation",
+                "Case",
+                "Order",
+                "Sale__c",
+            ):
                 filter_field = str(definition.get("filter_field", "AccountId"))
                 related_records = _filter_records_by_field(results.get(key, []), filter_field, account_id)
             elif key == "Individual":
@@ -568,10 +607,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 ]
                 related_records = [record for record in related_records if record]
             elif key in ("ContactPointPhone", "ContactPointEmail"):
-                individual_ids_for_account = individual_by_account.get(account_id, set())
-                related_records = []
-                for individual_id in individual_ids_for_account:
-                    related_records.extend(contact_point_mappings.get(key, {}).get(individual_id, []))
+                related_records = contact_point_account_mappings.get(key, {}).get(account_id, [])
             else:
                 related_records = []
             payload_records = []
