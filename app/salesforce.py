@@ -119,16 +119,11 @@ def list_sobjects(org: OrgConfig) -> List[Dict[str, str]]:
     return sobjects
 
 
-def _describe_sobject(org: OrgConfig, object_name: str) -> Dict:
+def describe_sobject(org: OrgConfig, object_name: str) -> List[Dict[str, str]]:
     path = f"/services/data/v57.0/sobjects/{object_name}" if object_name else ""
     if not path:
         raise SalesforceError("Missing object name")
     data, _ = _authorized_get(org, f"{path}/describe")
-    return data
-
-
-def describe_sobject(org: OrgConfig, object_name: str) -> List[Dict[str, str]]:
-    data = _describe_sobject(org, object_name)
     fields = []
     for field in data.get("fields", []):
         fields.append(
@@ -139,52 +134,6 @@ def describe_sobject(org: OrgConfig, object_name: str) -> List[Dict[str, str]]:
             }
         )
     return fields
-
-
-def describe_sobject_with_relationships(org: OrgConfig, object_name: str) -> Dict[str, object]:
-    data = _describe_sobject(org, object_name)
-    fields: List[Dict[str, object]] = []
-    parent_relationships: List[Dict[str, object]] = []
-    for field in data.get("fields", []):
-        item = {
-            "name": field.get("name", ""),
-            "label": field.get("label", ""),
-            "type": field.get("type", ""),
-            "relationshipName": field.get("relationshipName"),
-            "referenceTo": field.get("referenceTo", []),
-            "custom": bool(field.get("custom")),
-        }
-        fields.append(item)
-        relationship_name = field.get("relationshipName")
-        reference_to = field.get("referenceTo") or []
-        if relationship_name and reference_to:
-            parent_relationships.append(
-                {
-                    "relationshipName": relationship_name,
-                    "label": field.get("label", relationship_name),
-                    "field": field.get("name"),
-                    "referenceTo": reference_to,
-                }
-            )
-
-    child_relationships: List[Dict[str, object]] = []
-    for rel in data.get("childRelationships", []):
-        child_relationships.append(
-            {
-                "relationshipName": rel.get("relationshipName"),
-                "childSObject": rel.get("childSObject"),
-                "field": rel.get("field"),
-                "cascadeDelete": rel.get("cascadeDelete"),
-            }
-        )
-
-    return {
-        "name": data.get("name", object_name),
-        "label": data.get("label", object_name),
-        "fields": fields,
-        "parentRelationships": parent_relationships,
-        "childRelationships": child_relationships,
-    }
 
 
 def serialize_org(org: OrgConfig) -> Dict[str, Optional[str]]:
