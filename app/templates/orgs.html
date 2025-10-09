@@ -70,13 +70,20 @@
                     <tr
                       data-org="{{ org.id }}"
                       data-environment="{{ org.environment }}"
+                      data-custom-domain="{{ org.custom_domain or '' }}"
                       data-client-id="{{ org.client_id }}"
                       data-redirect-uri="{{ org.redirect_uri }}"
                       data-scope="{{ org.auth_scope }}"
                     >
                       <td>{{ org.id }}</td>
                       <td>{{ org.label }}</td>
-                      <td>{{ org.environment }}</td>
+                      <td>
+                        {% if org.environment == 'custom' and org.custom_domain %}
+                          {{ org.custom_domain }}
+                        {% else %}
+                          {{ org.environment }}
+                        {% endif %}
+                      </td>
                       <td>
                         {% if org.access_token %}
                           <span class="badge bg-success">{{ t('orgs.table.connected_badge') }}</span>

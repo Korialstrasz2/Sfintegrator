@@ -2021,10 +2021,8 @@ function bindOrgForm() {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    let environment = environmentSelect.value.trim();
-    if (environment === "custom") {
-      environment = customEnvironmentInput.value.trim();
-    }
+    const environment = environmentSelect.value.trim();
+    const customDomain = customEnvironmentInput.value.trim();
     const payload = {
       id: document.getElementById("org-id").value.trim(),
       label: document.getElementById("org-label").value.trim(),
@@ -2035,7 +2033,15 @@ function bindOrgForm() {
       auth_scope: document.getElementById("org-scope").value.trim() || "full refresh_token",
     };
 
-    if (!payload.id || !payload.label || !payload.client_id || !payload.redirect_uri || !payload.environment) {
+    if (environment === "custom") {
+      if (!customDomain) {
+        showToast(translate("toast.enter_custom_domain"), "warning");
+        return;
+      }
+      payload.custom_domain = customDomain;
+    }
+
+    if (!payload.id || !payload.label || !payload.client_id || !payload.redirect_uri || !environment) {
       showToast(translate("toast.fill_required"), "warning");
       return;
     }
@@ -2090,7 +2096,7 @@ function bindOrgForm() {
         customEnvironmentInput.value = "";
       } else {
         environmentSelect.value = "custom";
-        customEnvironmentInput.value = environment;
+        customEnvironmentInput.value = row.dataset.customDomain || "";
       }
       updateCustomEnvironmentVisibility(environmentSelect);
       document.getElementById("org-label").focus();

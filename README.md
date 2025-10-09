@@ -37,7 +37,9 @@ A lightweight Flask application to manage Salesforce org connections via OAuth 2
    The app runs on <http://localhost:5000>.
 
 4. Configure your Salesforce connected app with the callback URL `http://localhost:5000/oauth/callback` (or your deployed URL).
-5. Use the Org Configuration page to add your org credentials and authorize via OAuth.
+5. Use the Org Configuration page to add your org credentials and authorize via OAuth. If your org enforces My Domain logins, select
+   **Custom Domain** and enter the My Domain login URL (for example `https://your-domain.my.salesforce.com`) before clicking
+   **Connect**.
 
 ## Environment variables
 

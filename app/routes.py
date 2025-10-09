@@ -425,6 +425,18 @@ def api_create_org() -> Response:
     if not client_secret:
         return jsonify({"error": "client_secret is required for new orgs"}), 400
 
+    raw_environment = (data.get("environment") or "").strip()
+    raw_custom_domain = data.get("custom_domain") if isinstance(data.get("custom_domain"), str) else ""
+    custom_domain = raw_custom_domain.strip()
+
+    if raw_environment not in {"production", "sandbox", "custom"}:
+        if not custom_domain:
+            custom_domain = raw_environment
+        raw_environment = "custom"
+
+    if raw_environment == "custom" and not custom_domain:
+        return jsonify({"error": "custom_domain is required when using a custom environment"}), 400
+
     payload = {key: data.get(key) for key in OrgConfig.__dataclass_fields__.keys()}
     payload["client_secret"] = client_secret.strip()
     if payload.get("auth_scope"):
@@ -435,8 +447,8 @@ def api_create_org() -> Response:
         payload["client_id"] = payload["client_id"].strip()
     if payload.get("label"):
         payload["label"] = payload["label"].strip()
-    if payload.get("environment"):
-        payload["environment"] = payload["environment"].strip()
+    payload["environment"] = raw_environment or "production"
+    payload["custom_domain"] = custom_domain or None
     if payload.get("redirect_uri"):
         payload["redirect_uri"] = payload["redirect_uri"].strip()
     if not payload.get("environment"):
