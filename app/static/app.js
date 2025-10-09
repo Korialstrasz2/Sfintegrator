@@ -277,7 +277,7 @@ function placeKeywordsOnNewLines(value = "") {
       return `${prefix}${pattern}`;
     });
   });
-  formatted = formatted.replace(/[ \t]+\n/g, "\n");
+  formatted = formatted.replace(/[ \t]{2,}\n/g, "\n");
   formatted = formatted.replace(/\n{3,}/g, "\n\n");
   return formatted;
 }
@@ -794,6 +794,33 @@ function bindQueryEditor() {
   textarea.addEventListener("click", () => updateFieldSuggestions());
   textarea.addEventListener("focus", () => updateFieldSuggestions());
   textarea.addEventListener("mouseup", () => updateFieldSuggestions());
+  textarea.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight") {
+      return;
+    }
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    if (start !== end) {
+      return;
+    }
+    if (start >= textarea.value.length) {
+      return;
+    }
+    const currentChar = textarea.value.charAt(start);
+    const previousChar = start > 0 ? textarea.value.charAt(start - 1) : "";
+    if (currentChar === "\n" && previousChar && !/\s/.test(previousChar)) {
+      event.preventDefault();
+      const before = textarea.value.slice(0, start);
+      const after = textarea.value.slice(start);
+      textarea.value = `${before} ${after}`;
+      const newCursor = Math.min(before.length + 2, textarea.value.length);
+      if (typeof textarea.setSelectionRange === "function") {
+        textarea.setSelectionRange(newCursor, newCursor);
+      }
+      refreshQueryEditorState();
+      saveQueryDraftToStorage(textarea.value);
+    }
+  });
   textarea.addEventListener("keyup", (event) => {
     const navigationKeys = [
       "ArrowLeft",
@@ -1157,11 +1184,33 @@ function escapeHtml(value) {
 
 function insertIntoQuery(snippet) {
   const textarea = document.getElementById("soql-query");
-  if (!textarea) return;
-  const start = textarea.selectionStart ?? textarea.value.length;
-  const end = textarea.selectionEnd ?? textarea.value.length;
-  const before = textarea.value.slice(0, start);
-  const after = textarea.value.slice(end);
+  if (!textarea || typeof snippet !== "string") return;
+  const value = textarea.value ?? "";
+  let start = textarea.selectionStart ?? value.length;
+  let end = textarea.selectionEnd ?? value.length;
+  if (start > end) {
+    [start, end] = [end, start];
+  }
+
+  if (start === end) {
+    let segmentStart = start;
+    while (segmentStart > 0 && /[A-Za-z0-9_.]/.test(value.charAt(segmentStart - 1))) {
+      segmentStart -= 1;
+    }
+    const prefix = value.slice(segmentStart, start);
+    const lastDot = prefix.lastIndexOf(".");
+    if (lastDot >= 0) {
+      start = segmentStart + lastDot + 1;
+    } else {
+      start = segmentStart;
+    }
+    while (end < value.length && /[A-Za-z0-9_]/.test(value.charAt(end))) {
+      end += 1;
+    }
+  }
+
+  const before = value.slice(0, start);
+  const after = value.slice(end);
   const needsSpaceBefore = before.length > 0 && !/\s$/.test(before);
   const needsSpaceAfter = after.length > 0 && !/^\s/.test(after);
   const insertion = `${needsSpaceBefore ? " " : ""}${snippet}${needsSpaceAfter ? " " : ""}`;
@@ -1169,7 +1218,9 @@ function insertIntoQuery(snippet) {
   textarea.value = newValue;
   const cursorPosition = before.length + insertion.length;
   textarea.focus();
-  textarea.setSelectionRange(cursorPosition, cursorPosition);
+  if (typeof textarea.setSelectionRange === "function") {
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }
   applyKeywordFormatting(textarea);
   refreshQueryEditorState();
 }
@@ -1256,49 +1307,84 @@ function bindSnippetButtons() {
   }
 }
 
+async function runQuery(options = {}) {
+  const { bypassValidation = false, fetchAll = false, maxRecords = null } = options;
+  const queryInput = document.getElementById("soql-query");
+  const query = queryInput?.value.trim() ?? "";
+  if (!state.selectedOrg) {
+    showToast(translate("toast.select_org"), "warning");
+    return;
+  }
+  if (!query) {
+    showToast(translate("toast.enter_query"), "warning");
+    return;
+  }
+
+  const hasLimit = /\bLIMIT\b/i.test(query);
+  const hasWhere = /\bWHERE\b/i.test(query);
+  if (!bypassValidation && !hasLimit && !hasWhere) {
+    showToast(translate("frontend.toast.query_without_limit_where"), "danger");
+    return;
+  }
+
+  saveQueryDraftToStorage(queryInput?.value ?? query);
+
+  const payload = { org_id: state.selectedOrg, query };
+  let effectiveMaxRecords = null;
+  if (fetchAll) {
+    const parsedMaxRecords = Number.isFinite(maxRecords) ? maxRecords : Number.parseInt(maxRecords, 10);
+    effectiveMaxRecords = Number.isFinite(parsedMaxRecords) && parsedMaxRecords > 0 ? parsedMaxRecords : null;
+    payload.options = { fetch_all: true };
+    if (effectiveMaxRecords) {
+      payload.options.max_records = effectiveMaxRecords;
+    }
+  }
+
+  try {
+    const response = await fetch("/api/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || translate("toast.query_failed"));
+    }
+    const queryFields = getSelectFields(query);
+    renderQueryResult({ ...data, queryFields });
+    loadQueryHistory(state.queryHistory.filter);
+    if (data?.truncated) {
+      const limit = data?.max_records ?? effectiveMaxRecords ?? data?.records?.length ?? "";
+      const limitText = typeof limit === "number" ? limit.toLocaleString() : limit;
+      showToast(
+        translate("frontend.toast.query_truncated", { limit: limitText }),
+        "warning"
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : translate("toast.query_failed");
+    showToast(message, "danger");
+  }
+}
+
 function bindQueryForm() {
   const form = document.getElementById("query-form");
   if (!form) return;
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const queryInput = document.getElementById("soql-query");
-    const query = queryInput?.value.trim() ?? "";
-    if (!state.selectedOrg) {
-      showToast(translate("toast.select_org"), "warning");
-      return;
-    }
-    if (!query) {
-      showToast(translate("toast.enter_query"), "warning");
-      return;
-    }
-
-    const hasLimit = /\bLIMIT\b/i.test(query);
-    const hasWhere = /\bWHERE\b/i.test(query);
-    if (!hasLimit && !hasWhere) {
-      showToast(translate("frontend.toast.query_without_limit_where"), "danger");
-      return;
-    }
-
-    saveQueryDraftToStorage(queryInput?.value ?? query);
-
-    try {
-      const response = await fetch("/api/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_id: state.selectedOrg, query }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || translate("toast.query_failed"));
-      }
-      const queryFields = getSelectFields(query);
-      renderQueryResult({ ...data, queryFields });
-      loadQueryHistory(state.queryHistory.filter);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : translate("toast.query_failed");
-      showToast(message, "danger");
-    }
+    runQuery();
   });
+  const bypassButton = document.getElementById("run-query-bypass");
+  if (bypassButton) {
+    bypassButton.addEventListener("click", () => runQuery({ bypassValidation: true }));
+  }
+  const fetchAllButton = document.getElementById("run-query-fetch-all");
+  if (fetchAllButton) {
+    fetchAllButton.addEventListener("click", () => {
+      const maxRecords = Number.parseInt(fetchAllButton.dataset.maxRecords || "", 10);
+      runQuery({ bypassValidation: true, fetchAll: true, maxRecords });
+    });
+  }
 }
 
 async function loadSavedQueries() {

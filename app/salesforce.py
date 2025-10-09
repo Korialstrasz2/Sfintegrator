@@ -105,15 +105,37 @@ def query(org: OrgConfig, soql: str) -> Dict:
     return data
 
 
-def query_all(org: OrgConfig, soql: str) -> Dict[str, object]:
+def query_all(org: OrgConfig, soql: str, max_records: Optional[int] = None) -> Dict[str, object]:
     data, current_org = _authorized_get(org, "/services/data/v57.0/query", params={"q": soql})
     records = list(data.get("records", []))
     next_url = data.get("nextRecordsUrl")
+    truncated = False
+
     while next_url:
+        if max_records is not None and len(records) >= max_records:
+            truncated = True
+            break
         data, current_org = _authorized_get(current_org, next_url)
-        records.extend(data.get("records", []))
+        chunk = data.get("records", [])
+        if chunk:
+            records.extend(chunk)
         next_url = data.get("nextRecordsUrl")
-    return {"records": records, "totalSize": len(records)}
+
+    if max_records is not None and len(records) > max_records:
+        truncated = True
+        records = records[:max_records]
+
+    has_more = bool(next_url) or truncated
+    payload: Dict[str, object] = {
+        "records": records,
+        "totalSize": len(records),
+        "done": not has_more,
+        "nextRecordsUrl": None if truncated else next_url,
+        "truncated": truncated,
+    }
+    if max_records is not None and max_records > 0:
+        payload["max_records"] = max_records
+    return payload
 
 
 def list_sobjects(org: OrgConfig) -> List[Dict[str, str]]:
