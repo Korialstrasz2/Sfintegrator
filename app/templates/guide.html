@@ -40,6 +40,15 @@
       {% endfor %}
     </ol>
 
+    {% if sections.get('advanced') %}
+      <h5>{{ sections['advanced']['title'] }}</h5>
+      <ol>
+        {% for step in sections['advanced']['steps'] %}
+          <li>{{ step|safe }}</li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+
     <div class="alert alert-info mt-4">
       <strong>{{ guide['tip']['title'] }}</strong> {{ guide['tip']['content']|safe }}
     </div>

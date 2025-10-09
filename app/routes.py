@@ -20,6 +20,7 @@ from .salesforce import (
     exchange_code_for_token,
     list_sobjects,
     query,
+    query_all,
     serialize_org,
 )
 from .i18n import (DEFAULT_LANGUAGE, get_frontend_translations,
@@ -511,12 +512,28 @@ def api_query() -> Response:
     if not org_id or not soql:
         return jsonify({"error": "org_id and query are required"}), 400
 
+    raw_options = payload.get("options")
+    options = raw_options if isinstance(raw_options, dict) else {}
+    fetch_all = bool(options.get("fetch_all"))
+    max_records = None
+    if fetch_all:
+        raw_max = options.get("max_records")
+        try:
+            parsed = int(raw_max)
+        except (TypeError, ValueError):
+            parsed = None
+        if parsed and parsed > 0:
+            max_records = parsed
+
     org = storage.get(org_id)
     if not org:
         return jsonify({"error": "Unknown org"}), 404
 
     try:
-        result = query(org, soql)
+        if fetch_all:
+            result = query_all(org, soql, max_records=max_records)
+        else:
+            result = query(org, soql)
     except SalesforceError as exc:
         return jsonify({"error": str(exc)}), 400
 
