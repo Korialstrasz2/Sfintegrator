@@ -26,9 +26,34 @@ class OrgConfig:
     environment: str
     redirect_uri: str
     auth_scope: str = "full refresh_token"
+    custom_domain: Optional[str] = None
     instance_url: Optional[str] = None
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.environment = (self.environment or "").strip().lower() or "production"
+
+        # Backwards compatibility: older installations stored the custom domain
+        # directly in the environment field. When we detect this scenario we
+        # migrate the value to the new ``custom_domain`` attribute on the fly.
+        if self.environment not in {"production", "sandbox", "custom"}:
+            if not self.custom_domain:
+                self.custom_domain = self.environment
+            self.environment = "custom"
+
+        if self.custom_domain:
+            normalized = self.custom_domain.strip()
+            if normalized and not normalized.startswith(("http://", "https://")):
+                normalized = f"https://{normalized}"
+            normalized = normalized.rstrip("/")
+            self.custom_domain = normalized or None
+
+        if self.environment == "custom" and not self.custom_domain:
+            # Fall back to the production login so the application keeps
+            # working instead of failing with an exception. This mirrors the
+            # behaviour prior to the introduction of custom domains.
+            self.environment = "production"
 
     @property
     def login_url(self) -> str:
@@ -36,7 +61,9 @@ class OrgConfig:
             return "https://login.salesforce.com"
         if self.environment == "sandbox":
             return "https://test.salesforce.com"
-        return self.environment
+        if self.custom_domain:
+            return self.custom_domain
+        return "https://login.salesforce.com"
 
 
 class OrgStorage:
