@@ -46,3 +46,7 @@ Set `FLASK_SECRET_KEY` to override the default secret key in production deployme
 ## Data storage
 
 Org definitions and OAuth tokens are stored in `data/orgs.json`. Treat this file as sensitive because it may contain refresh tokens.
+
+## Troubleshooting
+
+- **"Restricted Domain" during login:** Your Salesforce org likely enforces the *Restrict login domains* policy and rejects credentials on `login.salesforce.com` or `test.salesforce.com`. When adding the org in SF Integrator, choose **Custom Domain** and provide your My Domain login URL (for example `https://your-domain.my.salesforce.com`). Alternatively, relax the policy in **Setup → My Domain** so the OAuth flow can start from the selected host.

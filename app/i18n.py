@@ -250,6 +250,13 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                         "Use <strong>Run up to 500k records</strong> to request more data via the Salesforce QueryAll API (up to 500,000 records) and plan for longer execution times.",
                     ],
                 },
+                "troubleshooting": {
+                    "title": "Troubleshooting",
+                    "steps": [
+                        "If Salesforce reports <strong>Restricted Domain</strong> during login, your org likely enforces the <em>Restrict login domains</em> policy. Choose <strong>Custom Domain</strong> in the Org Configuration page and enter your My Domain login URL (for example <code>https://your-domain.my.salesforce.com</code>).",
+                        "Alternatively, update the org's My Domain login policy in <strong>Setup &gt; My Domain</strong> so that <code>login.salesforce.com</code> or <code>test.salesforce.com</code> is allowed, or launch the OAuth flow from a permitted host.",
+                    ],
+                },
             },
             "tip": {
                 "title": "Tip:",
@@ -627,6 +634,13 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                     "steps": [
                         "Scegli <strong>Esegui senza LIMIT/WHERE</strong> per lanciare query mirate senza la convalida predefinita quando ti fidi del tuo SOQL.",
                         "Usa <strong>Esegui fino a 500k record</strong> per richiedere più dati tramite l'API QueryAll di Salesforce (fino a 500.000 record) e prevedi tempi di esecuzione maggiori.",
+                    ],
+                },
+                "troubleshooting": {
+                    "title": "Risoluzione dei problemi",
+                    "steps": [
+                        "Se Salesforce segnala <strong>Restricted Domain</strong> durante l'accesso, l'organizzazione applica probabilmente la policy <em>Restrict login domains</em>. Scegli <strong>Dominio personalizzato</strong> nella pagina Configurazione org e inserisci l'URL di accesso My Domain (ad esempio <code>https://tuo-dominio.my.salesforce.com</code>).",
+                        "In alternativa aggiorna la policy di accesso My Domain in <strong>Setup &gt; My Domain</strong> in modo che <code>login.salesforce.com</code> o <code>test.salesforce.com</code> siano consentiti, oppure avvia il flusso OAuth da un host autorizzato.",
                     ],
                 },
             },

@@ -49,6 +49,15 @@
       </ol>
     {% endif %}
 
+    {% if sections.get('troubleshooting') %}
+      <h5>{{ sections['troubleshooting']['title'] }}</h5>
+      <ol>
+        {% for step in sections['troubleshooting']['steps'] %}
+          <li>{{ step|safe }}</li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+
     <div class="alert alert-info mt-4">
       <strong>{{ guide['tip']['title'] }}</strong> {{ guide['tip']['content']|safe }}
     </div>
