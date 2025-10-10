@@ -293,11 +293,3 @@ body.theme-sci-fi {
 .sidebar-tools-card .tab-pane > :last-child {
   margin-bottom: 0;
 }
-#soql-query.soql-query-editor {
-  font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-      "Liberation Mono", "Courier New", monospace);
-  white-space: pre;
-  overflow-x: auto;
-  tab-size: 2;
-}
-
