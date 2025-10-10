@@ -8,7 +8,13 @@
         <form id="query-form" class="mb-4">
           <div class="mb-3">
             <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
-            <textarea id="soql-query" class="form-control" rows="5">{{ t('index.query.soql_placeholder') }}</textarea>
+            <textarea
+              id="soql-query"
+              class="form-control soql-query-editor"
+              rows="5"
+              wrap="off"
+              spellcheck="false"
+            >{{ t('index.query.soql_placeholder') }}</textarea>
           </div>
           <div
             id="query-field-suggestions"
