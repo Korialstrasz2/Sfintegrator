@@ -271,13 +271,25 @@ function placeKeywordsOnNewLines(value = "") {
   }
   let formatted = value.replace(/\r\n/g, "\n");
   KEYWORD_PATTERNS.forEach((pattern) => {
-    const regex = new RegExp(`\\s*\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "gi");
-    formatted = formatted.replace(regex, (match, offset) => {
-      const prefix = offset === 0 ? "" : "\n";
-      return `${prefix}${pattern}`;
+    const regex = new RegExp(`(\\s*)\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "gi");
+    formatted = formatted.replace(regex, (match, whitespace, offset) => {
+      if (offset === 0) {
+        return pattern;
+      }
+
+      if (whitespace && whitespace.includes("\n")) {
+        const newlineMatch = whitespace.match(/([ \t]*)\n[ \t]*$/);
+        if (newlineMatch) {
+          const preservedTrailingSpaces = newlineMatch[1] || "";
+          const prefix = whitespace.slice(0, whitespace.length - newlineMatch[0].length);
+          return `${prefix}${preservedTrailingSpaces}\n${pattern}`;
+        }
+        return `\n${pattern}`;
+      }
+
+      return `\n${pattern}`;
     });
   });
-  formatted = formatted.replace(/[ \t]{2,}\n/g, "\n");
   formatted = formatted.replace(/\n{3,}/g, "\n\n");
   return formatted;
 }
