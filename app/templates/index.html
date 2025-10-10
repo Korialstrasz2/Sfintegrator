@@ -8,7 +8,13 @@
         <form id="query-form" class="mb-4">
           <div class="mb-3">
             <label class="form-label" for="soql-query">{{ t('index.query.soql_label') }}</label>
-            <textarea id="soql-query" class="form-control" rows="5">{{ t('index.query.soql_placeholder') }}</textarea>
+            <textarea
+              id="soql-query"
+              class="form-control soql-query-editor"
+              rows="5"
+              wrap="off"
+              spellcheck="false"
+            >{{ t('index.query.soql_placeholder') }}</textarea>
           </div>
           <div
             id="query-field-suggestions"
@@ -30,7 +36,24 @@
               {{ t('index.query.helpers.add_order_by') }}
             </button>
           </div>
-          <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
+          <div class="d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary">{{ t('index.query.run_button') }}</button>
+            <button
+              type="button"
+              id="run-query-bypass"
+              class="btn btn-outline-primary"
+            >
+              {{ t('index.query.run_button_bypass') }}
+            </button>
+            <button
+              type="button"
+              id="run-query-fetch-all"
+              class="btn btn-outline-primary"
+              data-max-records="500000"
+            >
+              {{ t('index.query.run_button_fetch_all') }}
+            </button>
+          </div>
         </form>
         <div id="query-result" class="table-responsive"></div>
       </div>

@@ -41,6 +41,8 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "soql_label": "SOQL Query",
                 "soql_placeholder": "SELECT Id\nFROM Account",
                 "run_button": "Run query",
+                "run_button_bypass": "Run without LIMIT/WHERE",
+                "run_button_fetch_all": "Run up to 500k records",
                 "helpers": {
                     "add_limit": "Add LIMIT 100",
                     "add_order_by": "Add ORDER BY CreatedDate DESC",
@@ -238,6 +240,14 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                         "Return to the <a href=\"{query_url}\">Query</a> page.",
                         "Select the org you just authorized and paste a SOQL query, e.g. <code>SELECT Id, Name FROM Account LIMIT 10</code>.",
                         "Click <strong>Run query</strong> to execute. Results appear in a table below the form.",
+                        "Need more data? Use the <strong>Run without LIMIT/WHERE</strong> button to bypass safeguards or <strong>Run up to 500k records</strong> to fetch a larger data set.",
+                    ],
+                },
+                "advanced": {
+                    "title": "4. Handle large result sets",
+                    "steps": [
+                        "Choose <strong>Run without LIMIT/WHERE</strong> to run ad-hoc queries that skip the default validation when you trust the SOQL.",
+                        "Use <strong>Run up to 500k records</strong> to request more data via the Salesforce QueryAll API (up to 500,000 records) and plan for longer execution times.",
                     ],
                 },
             },
@@ -307,6 +317,7 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "results_export_ready_excel": "Excel download started",
                 "results_export_failed": "Unable to export results",
                 "query_without_limit_where": "Add a WHERE or LIMIT clause before running the query.",
+                "query_truncated": "Showing the first {limit} records. Additional records were omitted.",
             },
             "query": {
                 "no_records": "No records returned.",
@@ -409,6 +420,8 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "soql_label": "Query SOQL",
                 "soql_placeholder": "SELECT Id\nFROM Account",
                 "run_button": "Esegui query",
+                "run_button_bypass": "Esegui senza LIMIT/WHERE",
+                "run_button_fetch_all": "Esegui fino a 500k record",
                 "helpers": {
                     "add_limit": "Aggiungi LIMIT 100",
                     "add_order_by": "Aggiungi ORDER BY CreatedDate DESC",
@@ -606,6 +619,14 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                         "Torna alla pagina <a href=\"{query_url}\">Query</a>.",
                         "Seleziona l'organizzazione appena autorizzata e incolla una query SOQL, ad esempio <code>SELECT Id, Name FROM Account LIMIT 10</code>.",
                         "Fai clic su <strong>Esegui query</strong> per lanciare l'operazione. I risultati compariranno nella tabella sotto il modulo.",
+                        "Hai bisogno di più dati? Usa i pulsanti <strong>Esegui senza LIMIT/WHERE</strong> o <strong>Esegui fino a 500k record</strong> accanto a Esegui query per bypassare i controlli.",
+                    ],
+                },
+                "advanced": {
+                    "title": "4. Gestisci risultati di grandi dimensioni",
+                    "steps": [
+                        "Scegli <strong>Esegui senza LIMIT/WHERE</strong> per lanciare query mirate senza la convalida predefinita quando ti fidi del tuo SOQL.",
+                        "Usa <strong>Esegui fino a 500k record</strong> per richiedere più dati tramite l'API QueryAll di Salesforce (fino a 500.000 record) e prevedi tempi di esecuzione maggiori.",
                     ],
                 },
             },
@@ -675,6 +696,7 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "results_export_ready_excel": "Download Excel avviato",
                 "results_export_failed": "Impossibile esportare i risultati",
                 "query_without_limit_where": "Aggiungi una clausola WHERE o LIMIT prima di eseguire la query.",
+                "query_truncated": "Visualizzazione limitata ai primi {limit} record. I successivi sono stati omessi.",
             },
             "query": {
                 "no_records": "Nessun record restituito.",
