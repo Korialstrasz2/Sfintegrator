@@ -7,7 +7,6 @@ from dataclasses import asdict
 from typing import Dict, List, Optional, Tuple
 
 import requests
-
 from .storage import OrgConfig, storage
 
 logger = logging.getLogger(__name__)

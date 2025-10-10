@@ -27,7 +27,42 @@ const STORAGE_KEYS = {
   selectedOrg: `${STORAGE_PREFIX}.selectedOrg`,
   queryDraft: `${STORAGE_PREFIX}.queryDraft`,
 };
+function replaceFieldTokenAtCursor(textarea, replacement) {
+  if (!textarea || !replacement) return;
+  const value = textarea.value || "";
+  const start = textarea.selectionStart ?? value.length;
+  const end = textarea.selectionEnd ?? start;
 
+  // If user has a selection, replace it directly
+  if (start !== end) {
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    textarea.value = `${before}${replacement}${after}`;
+  } else {
+    // Find token boundaries (stop at whitespace, comma, or parens)
+    const isDelim = (ch) => /[\s,()]/.test(ch);
+    let i = start - 1;
+    while (i >= 0 && !isDelim(value[i])) i--;
+    const tokenStart = i + 1;
+
+    let j = start;
+    while (j < value.length && !isDelim(value[j])) j++;
+    const tokenEnd = j;
+
+    const before = value.slice(0, tokenStart);
+    const after = value.slice(tokenEnd);
+    textarea.value = `${before}${replacement}${after}`;
+  }
+
+  const pos = (textarea.value.length - (value.length - end)) - (end - start) + (replacement.length - 0);
+  textarea.focus();
+  if (typeof textarea.setSelectionRange === "function") {
+    const newPos = Math.max(0, Math.min(textarea.value.length, pos));
+    textarea.setSelectionRange(newPos, newPos);
+  }
+  applyKeywordFormatting(textarea);
+  refreshQueryEditorState();
+}
 function getLocalStorage() {
   try {
     if (typeof window === "undefined" || !window.localStorage) {
@@ -879,14 +914,29 @@ function addFieldToSelectClause(fieldName) {
   refreshQueryEditorState();
 }
 
-function handleFieldSuggestionClick(fieldName, section) {
-  if (!fieldName) {
-    return;
-  }
-  if (section === "where") {
+function handleFieldSuggestionClick(fieldName /*, section */) {
+  if (!fieldName) return;
+
+  const textarea = document.getElementById("soql-query");
+  if (!textarea) return;
+
+  const query = textarea.value || "";
+  const cursor = textarea.selectionStart ?? query.length;
+  const context = getQueryContext(query, cursor);
+
+  // In WHERE: keep existing behavior (insert)
+  if (context.section === "where") {
     insertIntoQuery(fieldName);
     return;
   }
+
+  // In SELECT with a prefix token: replace it
+  if (context.section === "select" && context.prefix) {
+    replaceFieldTokenAtCursor(textarea, fieldName);
+    return;
+  }
+
+  // Fallback: append field to SELECT list
   addFieldToSelectClause(fieldName);
 }
 
