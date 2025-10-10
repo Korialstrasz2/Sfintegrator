@@ -1205,32 +1205,26 @@ function insertIntoQuery(snippet) {
   }
 
   if (start === end) {
-    const beforeCaret = value.slice(0, start);
-    const afterCaret = value.slice(end);
-
-    const backwardMatch = beforeCaret.match(/[A-Za-z0-9_.]+$/);
-    if (backwardMatch && backwardMatch[0]) {
-      const matchValue = backwardMatch[0];
-      const dotIndex = matchValue.lastIndexOf(".");
-      if (dotIndex >= 0) {
-        start -= matchValue.length - (dotIndex + 1);
-      } else {
-        start -= matchValue.length;
-      }
+    let segmentStart = start;
+    while (segmentStart > 0 && /[A-Za-z0-9_.]/.test(value.charAt(segmentStart - 1))) {
+      segmentStart -= 1;
     }
-
-    const forwardMatch = afterCaret.match(/^[A-Za-z0-9_]*/);
-    if (forwardMatch && forwardMatch[0]) {
-      end += forwardMatch[0].length;
+    const prefix = value.slice(segmentStart, start);
+    const lastDot = prefix.lastIndexOf(".");
+    if (lastDot >= 0) {
+      start = segmentStart + lastDot + 1;
+    } else {
+      start = segmentStart;
+    }
+    while (end < value.length && /[A-Za-z0-9_]/.test(value.charAt(end))) {
+      end += 1;
     }
   }
 
   const before = value.slice(0, start);
   const after = value.slice(end);
-  const charBefore = before.slice(-1);
-  const charAfter = after.charAt(0);
-  const needsSpaceBefore = before.length > 0 && charBefore && !/[\s,.(\[]/.test(charBefore);
-  const needsSpaceAfter = after.length > 0 && charAfter && !/[\s,.)\]]/.test(charAfter);
+  const needsSpaceBefore = before.length > 0 && !/\s$/.test(before);
+  const needsSpaceAfter = after.length > 0 && !/^\s/.test(after);
   const insertion = `${needsSpaceBefore ? " " : ""}${snippet}${needsSpaceAfter ? " " : ""}`;
   const newValue = `${before}${insertion}${after}`;
   textarea.value = newValue;
