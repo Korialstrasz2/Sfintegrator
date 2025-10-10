@@ -1205,16 +1205,23 @@ function insertIntoQuery(snippet) {
   }
 
   if (start === end) {
-    let segmentStart = start;
+    const originalStart = start;
+    let segmentEnd = start;
+    while (segmentEnd > 0 && /\s/.test(value.charAt(segmentEnd - 1))) {
+      segmentEnd -= 1;
+    }
+    let segmentStart = segmentEnd;
     while (segmentStart > 0 && /[A-Za-z0-9_.]/.test(value.charAt(segmentStart - 1))) {
       segmentStart -= 1;
     }
-    const prefix = value.slice(segmentStart, start);
-    const lastDot = prefix.lastIndexOf(".");
-    if (lastDot >= 0) {
-      start = segmentStart + lastDot + 1;
-    } else {
+    if (segmentStart !== segmentEnd) {
       start = segmentStart;
+      end = originalStart;
+      const prefix = value.slice(segmentStart, segmentEnd);
+      const lastDot = prefix.lastIndexOf(".");
+      if (lastDot >= 0) {
+        start = segmentStart + lastDot + 1;
+      }
     }
     while (end < value.length && /[A-Za-z0-9_]/.test(value.charAt(end))) {
       end += 1;
