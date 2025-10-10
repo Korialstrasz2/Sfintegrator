@@ -851,36 +851,58 @@ function bindQueryEditor() {
     syncSelection();
   });
   textarea.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowRight") {
-      syncSelection();
+    if (event.isComposing) {
       return;
     }
+
     const start = textarea.selectionStart ?? 0;
     const end = textarea.selectionEnd ?? 0;
-    if (start !== end) {
+    const value = textarea.value || "";
+    const hasSelection = start !== end;
+    const currentChar = value.charAt(start);
+    const previousChar = start > 0 ? value.charAt(start - 1) : "";
+    const shouldProtectNewline =
+      !hasSelection && currentChar === "\n" && previousChar && !/\s/.test(previousChar);
+
+    if (event.key === "ArrowRight") {
+      if (shouldProtectNewline) {
+        event.preventDefault();
+        const before = value.slice(0, start);
+        const after = value.slice(start);
+        textarea.value = `${before} ${after}`;
+        const newCursor = Math.min(before.length + 2, textarea.value.length);
+        if (typeof textarea.setSelectionRange === "function") {
+          textarea.setSelectionRange(newCursor, newCursor);
+        }
+        refreshQueryEditorState();
+        saveQueryDraftToStorage(textarea.value);
+        syncSelection();
+        return;
+      }
       syncSelection();
       return;
     }
-    if (start >= textarea.value.length) {
-      syncSelection();
-      return;
-    }
-    const currentChar = textarea.value.charAt(start);
-    const previousChar = start > 0 ? textarea.value.charAt(start - 1) : "";
-    if (currentChar === "\n" && previousChar && !/\s/.test(previousChar)) {
+
+    const isPrintableKey =
+      event.key?.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+    if (shouldProtectNewline && isPrintableKey) {
       event.preventDefault();
-      const before = textarea.value.slice(0, start);
-      const after = textarea.value.slice(start);
-      textarea.value = `${before} ${after}`;
-      const newCursor = Math.min(before.length + 2, textarea.value.length);
+      const before = value.slice(0, start);
+      const after = value.slice(end);
+      const insertion = event.key;
+      textarea.value = `${before}${insertion}${after}`;
+      const newCursor = before.length + insertion.length;
       if (typeof textarea.setSelectionRange === "function") {
         textarea.setSelectionRange(newCursor, newCursor);
       }
+      applyKeywordFormatting(textarea);
       refreshQueryEditorState();
       saveQueryDraftToStorage(textarea.value);
       syncSelection();
       return;
     }
+
     syncSelection();
   });
   textarea.addEventListener("keyup", (event) => {
