@@ -2,10 +2,6 @@ const state = {
   selectedOrg: null,
   savedQueries: [],
   activeSavedQueryId: null,
-  queryEditor: {
-    selectionStart: 0,
-    selectionEnd: 0,
-  },
   metadata: {
     objects: [],
     fields: {},
@@ -23,47 +19,6 @@ const state = {
     queryFields: [],
   },
 };
-
-function clampSelectionIndex(value, length) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return length;
-  }
-  return Math.max(0, Math.min(Math.floor(value), length));
-}
-
-function storeQuerySelection(start, end, length) {
-  const maxLength = typeof length === "number" && length >= 0 ? length : 0;
-  const normalizedStart = clampSelectionIndex(start, maxLength);
-  const normalizedEnd = clampSelectionIndex(end, maxLength);
-  state.queryEditor.selectionStart = Math.min(normalizedStart, normalizedEnd);
-  state.queryEditor.selectionEnd = Math.max(normalizedStart, normalizedEnd);
-}
-
-function getStoredQuerySelection(length) {
-  const maxLength = typeof length === "number" && length >= 0 ? length : 0;
-  const start = clampSelectionIndex(state.queryEditor.selectionStart, maxLength);
-  const end = clampSelectionIndex(state.queryEditor.selectionEnd, maxLength);
-  return { start: Math.min(start, end), end: Math.max(start, end) };
-}
-
-function rememberQuerySelection(textarea) {
-  if (!textarea) return;
-  const valueLength = textarea.value?.length ?? 0;
-  const start = textarea.selectionStart ?? valueLength;
-  const end = textarea.selectionEnd ?? valueLength;
-  storeQuerySelection(start, end, valueLength);
-}
-
-function resolveQuerySelection(textarea) {
-  const valueLength = textarea?.value?.length ?? 0;
-  if (textarea && document.activeElement === textarea) {
-    const start = textarea.selectionStart ?? valueLength;
-    const end = textarea.selectionEnd ?? valueLength;
-    storeQuerySelection(start, end, valueLength);
-    return { start, end };
-  }
-  return getStoredQuerySelection(valueLength);
-}
 
 const STORAGE_PREFIX = "sfint";
 const STORAGE_KEYS = {
@@ -823,7 +778,6 @@ function downloadFile(content, filename, mimeType) {
 function bindQueryEditor() {
   const textarea = document.getElementById("soql-query");
   if (!textarea) return;
-  const syncSelection = () => rememberQuerySelection(textarea);
   const storedDraft = loadQueryDraftFromStorage();
   if (storedDraft && storedDraft.trim()) {
     textarea.value = storedDraft;
@@ -836,33 +790,20 @@ function bindQueryEditor() {
     applyKeywordFormatting(textarea);
     refreshQueryEditorState();
     saveQueryDraftToStorage(textarea.value);
-    syncSelection();
   });
-  textarea.addEventListener("click", () => {
-    updateFieldSuggestions();
-    syncSelection();
-  });
-  textarea.addEventListener("focus", () => {
-    updateFieldSuggestions();
-    syncSelection();
-  });
-  textarea.addEventListener("mouseup", () => {
-    updateFieldSuggestions();
-    syncSelection();
-  });
+  textarea.addEventListener("click", () => updateFieldSuggestions());
+  textarea.addEventListener("focus", () => updateFieldSuggestions());
+  textarea.addEventListener("mouseup", () => updateFieldSuggestions());
   textarea.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowRight") {
-      syncSelection();
       return;
     }
     const start = textarea.selectionStart ?? 0;
     const end = textarea.selectionEnd ?? 0;
     if (start !== end) {
-      syncSelection();
       return;
     }
     if (start >= textarea.value.length) {
-      syncSelection();
       return;
     }
     const currentChar = textarea.value.charAt(start);
@@ -878,10 +819,7 @@ function bindQueryEditor() {
       }
       refreshQueryEditorState();
       saveQueryDraftToStorage(textarea.value);
-      syncSelection();
-      return;
     }
-    syncSelection();
   });
   textarea.addEventListener("keyup", (event) => {
     const navigationKeys = [
@@ -897,12 +835,8 @@ function bindQueryEditor() {
     if (navigationKeys.includes(event.key)) {
       updateFieldSuggestions();
     }
-    syncSelection();
   });
-  textarea.addEventListener("select", syncSelection);
-  textarea.addEventListener("blur", syncSelection);
   refreshQueryEditorState();
-  syncSelection();
 }
 
 function addFieldToSelectClause(fieldName) {
@@ -1252,9 +1186,8 @@ function insertIntoQuery(snippet) {
   const textarea = document.getElementById("soql-query");
   if (!textarea || typeof snippet !== "string") return;
   const value = textarea.value ?? "";
-  const selection = resolveQuerySelection(textarea);
-  let start = selection.start;
-  let end = selection.end;
+  let start = textarea.selectionStart ?? value.length;
+  let end = textarea.selectionEnd ?? value.length;
   if (start > end) {
     [start, end] = [end, start];
   }
@@ -1288,7 +1221,6 @@ function insertIntoQuery(snippet) {
   if (typeof textarea.setSelectionRange === "function") {
     textarea.setSelectionRange(cursorPosition, cursorPosition);
   }
-  rememberQuerySelection(textarea);
   applyKeywordFormatting(textarea);
   refreshQueryEditorState();
 }
