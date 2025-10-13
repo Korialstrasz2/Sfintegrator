@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -8,7 +9,18 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from flask import session
 
@@ -124,10 +136,194 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 }
 
 
+class AlertExpressionError(Exception):
+    """Raised when an alert expression cannot be compiled."""
+
+
+def _generate_alert_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _normalize_alert_object_key(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        key = value.strip()
+    else:
+        key = ""
+    if not key:
+        return None
+    if key not in _OBJECT_DEFINITIONS:
+        return None
+    return key
+
+
+def _sanitize_alert_entries(
+    alerts_payload: Optional[Sequence[Mapping[str, object]]]
+) -> List[Dict[str, object]]:
+    if not isinstance(alerts_payload, Sequence) or isinstance(alerts_payload, (str, bytes)):
+        return []
+    sanitized: List[Dict[str, object]] = []
+    seen_ids: Set[str] = set()
+    for item in alerts_payload:
+        if not isinstance(item, Mapping):
+            continue
+        object_key = _normalize_alert_object_key(item.get("object") or item.get("objectKey"))
+        if not object_key:
+            continue
+        raw_expression = item.get("expression")
+        expression = str(raw_expression).strip() if isinstance(raw_expression, str) else ""
+        if not expression:
+            continue
+        raw_id = item.get("id")
+        alert_id = str(raw_id).strip() if isinstance(raw_id, str) else ""
+        if not alert_id:
+            alert_id = _generate_alert_id()
+        if alert_id in seen_ids:
+            continue
+        raw_name = item.get("name")
+        name = str(raw_name).strip() if isinstance(raw_name, str) else ""
+        if not name:
+            name = expression
+        raw_description = item.get("description")
+        description = (
+            str(raw_description).strip() if isinstance(raw_description, str) else ""
+        )
+        object_label = _OBJECT_DEFINITIONS.get(object_key, {}).get("label", object_key)
+        sanitized.append(
+            {
+                "id": alert_id,
+                "name": name,
+                "object": object_key,
+                "objectLabel": object_label,
+                "expression": expression,
+                "description": description or None,
+            }
+        )
+        seen_ids.add(alert_id)
+    return sanitized
+
+
+def _transform_alert_expression(expression: str) -> str:
+    text = expression.replace("&&", " and ").replace("||", " or ")
+    text = re.sub(r"(?<![=!<>])!(?!=)", " not ", text)
+    text = re.sub(r"\bnull\b", "None", text, flags=re.IGNORECASE)
+    text = re.sub(r"\btrue\b", "True", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bfalse\b", "False", text, flags=re.IGNORECASE)
+    return text
+
+
+_ALERT_ALLOWED_NODES: Tuple[type, ...] = (
+    ast.Expression,
+    ast.BoolOp,
+    ast.UnaryOp,
+    ast.BinOp,
+    ast.Compare,
+    ast.Name,
+    ast.Load,
+    ast.Attribute,
+    ast.Subscript,
+    ast.Slice,
+    ast.List,
+    ast.Tuple,
+    ast.Dict,
+    ast.Set,
+    ast.Constant,
+    ast.NameConstant,
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Gt,
+    ast.GtE,
+    ast.Lt,
+    ast.LtE,
+    ast.Is,
+    ast.IsNot,
+    ast.In,
+    ast.NotIn,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.UAdd,
+    ast.USub,
+)
+
+
+def _validate_alert_ast(node: ast.AST) -> None:
+    if not isinstance(node, _ALERT_ALLOWED_NODES):
+        raise AlertExpressionError(
+            f"Unsupported operation in alert expression: {type(node).__name__}"
+        )
+    for child in ast.iter_child_nodes(node):
+        _validate_alert_ast(child)
+
+
+class _AlertRecordAccessor:
+    def __init__(self, data: Mapping[str, Any]):
+        self._data = data
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._wrap(self._data.get(name))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._wrap(self._data.get(key))
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._wrap(self._data.get(key, default))
+
+    def __bool__(self) -> bool:
+        return bool(self._data)
+
+    @staticmethod
+    def _wrap(value: Any) -> Any:
+        return _wrap_alert_value(value)
+
+
+def _wrap_alert_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _AlertRecordAccessor(value)
+    if isinstance(value, list):
+        return [_wrap_alert_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_wrap_alert_value(item) for item in value)
+    return value
+
+
+def _build_alert_context(record: Optional[Mapping[str, Any]], object_key: str) -> Dict[str, Any]:
+    base: Mapping[str, Any]
+    if isinstance(record, Mapping):
+        base = record
+    else:
+        base = {}
+    accessor = _AlertRecordAccessor(base)
+    context: Dict[str, Any] = {
+        object_key: accessor,
+        "record": accessor,
+        "fields": accessor,
+        "null": None,
+        "None": None,
+        "True": True,
+        "False": False,
+    }
+    for key, value in base.items():
+        if not isinstance(key, str):
+            continue
+        if not key or not key.isidentifier():
+            continue
+        if key not in context:
+            context[key] = _wrap_alert_value(value)
+    return context
+
 @dataclass
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
     objects: List[Dict[str, object]] = field(default_factory=list)
+    alerts: List[Dict[str, object]] = field(default_factory=list)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
@@ -152,6 +348,7 @@ class ExplorerConfig:
                 for item in self.objects
                 if isinstance(item, dict) and item.get("key")
             ],
+            "alerts": self.get_alerts(),
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
         }
@@ -176,6 +373,53 @@ class ExplorerConfig:
                 continue
             configured.append({**definition, "hidden": False})
         return configured
+
+    def get_alerts(self) -> List[Dict[str, object]]:
+        sanitized: List[Dict[str, object]] = []
+        seen: Set[str] = set()
+        for item in self.alerts:
+            if not isinstance(item, Mapping):
+                continue
+            alert_id = str(item.get("id") or "").strip()
+            if not alert_id or alert_id in seen:
+                continue
+            object_key = _normalize_alert_object_key(item.get("object"))
+            if not object_key:
+                continue
+            expression_raw = item.get("expression")
+            expression = (
+                str(expression_raw).strip() if isinstance(expression_raw, str) else ""
+            )
+            if not expression:
+                continue
+            name_raw = item.get("name")
+            name = str(name_raw).strip() if isinstance(name_raw, str) else ""
+            if not name:
+                name = expression
+            description_raw = item.get("description")
+            if isinstance(description_raw, str):
+                description = description_raw.strip() or None
+            elif description_raw:
+                description = str(description_raw)
+            else:
+                description = None
+            object_label = (
+                str(item.get("objectLabel"))
+                if isinstance(item.get("objectLabel"), str)
+                else _OBJECT_DEFINITIONS.get(object_key, {}).get("label", object_key)
+            )
+            sanitized.append(
+                {
+                    "id": alert_id,
+                    "name": name,
+                    "object": object_key,
+                    "objectLabel": object_label,
+                    "expression": expression,
+                    "description": description,
+                }
+            )
+            seen.add(alert_id)
+        return sanitized
 
 
 @dataclass
@@ -213,6 +457,125 @@ _object_fields_cache: Dict[Tuple[str, str], Set[str]] = {}
 
 logger = logging.getLogger(__name__)
 
+
+def _compile_alert_expression(expression: str) -> object:
+    transformed = _transform_alert_expression(expression)
+    try:
+        tree = ast.parse(transformed, mode="eval")
+    except SyntaxError as exc:
+        raise AlertExpressionError(str(exc)) from exc
+    _validate_alert_ast(tree)
+    return compile(tree, "<alert>", "eval")
+
+
+class AlertEvaluator:
+    def __init__(self, definition: Mapping[str, object]):
+        self.id = str(definition.get("id"))
+        self.object_key = str(definition.get("object"))
+        self.object_label = str(
+            definition.get("objectLabel")
+            or _OBJECT_DEFINITIONS.get(self.object_key, {}).get("label", self.object_key)
+        )
+        raw_expression = definition.get("expression")
+        self.expression = str(raw_expression) if isinstance(raw_expression, str) else ""
+        raw_name = definition.get("name")
+        self.name = str(raw_name).strip() if isinstance(raw_name, str) else ""
+        if not self.name:
+            self.name = self.expression
+        raw_description = definition.get("description")
+        if isinstance(raw_description, str):
+            description = raw_description.strip()
+        else:
+            description = ""
+        self.message = description or self.expression
+        if not self.id or not self.object_key or not self.expression:
+            raise AlertExpressionError("Incomplete alert definition")
+        self._code = _compile_alert_expression(self.expression)
+        self._error_logged = False
+
+    def evaluate(self, record: Mapping[str, Any]) -> bool:
+        context = _build_alert_context(record, self.object_key)
+        try:
+            result = eval(self._code, {"__builtins__": {}}, context)
+        except Exception as exc:  # pragma: no cover - defensive
+            if not self._error_logged:
+                logger.warning("Unable to evaluate alert %s: %s", self.id, exc)
+                self._error_logged = True
+            return False
+        return bool(result)
+
+
+def _prepare_alert_evaluators(
+    alerts: Sequence[Mapping[str, object]],
+    warnings: MutableMapping[str, str],
+) -> List[AlertEvaluator]:
+    evaluators: List[AlertEvaluator] = []
+    for alert in alerts:
+        try:
+            evaluators.append(AlertEvaluator(alert))
+        except AlertExpressionError as exc:
+            alert_id = str(alert.get("id") or "alert")
+            alert_name = str(alert.get("name") or alert_id)
+            key = f"alert:{alert_id}"
+            warnings[key] = f"Alert \"{alert_name}\" disabled: {exc}"
+    return evaluators
+
+
+def _evaluate_alerts_for_account(
+    account_record: Optional[Mapping[str, Any]],
+    related_records: Mapping[str, Sequence[Mapping[str, Any]]],
+    evaluators: Sequence[AlertEvaluator],
+) -> Tuple[List[Dict[str, Any]], Dict[int, List[Dict[str, Any]]]]:
+    account_alerts: Dict[str, Dict[str, Any]] = {}
+    record_alerts: Dict[int, List[Dict[str, Any]]] = {}
+    for evaluator in evaluators:
+        if evaluator.object_key == "Account":
+            if isinstance(account_record, Mapping):
+                candidates: Sequence[Mapping[str, Any]] = [account_record]
+            else:
+                candidates = []
+        else:
+            candidates = [
+                record
+                for record in related_records.get(evaluator.object_key, [])
+                if isinstance(record, Mapping)
+            ]
+        if not candidates:
+            continue
+        for record in candidates:
+            if not evaluator.evaluate(record):
+                continue
+            summary = account_alerts.setdefault(
+                evaluator.id,
+                {
+                    "id": evaluator.id,
+                    "name": evaluator.name,
+                    "message": evaluator.message,
+                    "object": evaluator.object_key,
+                    "objectLabel": evaluator.object_label,
+                    "expression": evaluator.expression,
+                    "recordCount": 0,
+                    "records": [],
+                },
+            )
+            summary["recordCount"] += 1
+            record_id = record.get("Id") if isinstance(record, Mapping) else None
+            summary["records"].append(
+                {
+                    "object": evaluator.object_key,
+                    "objectLabel": evaluator.object_label,
+                    "id": str(record_id) if record_id else None,
+                }
+            )
+            payload = {
+                "id": evaluator.id,
+                "name": evaluator.name,
+                "message": evaluator.message,
+                "object": evaluator.object_key,
+                "objectLabel": evaluator.object_label,
+            }
+            record_alerts.setdefault(id(record), []).append(payload)
+    return list(account_alerts.values()), record_alerts
 
 _RECOVERABLE_ERROR_CODES: Set[str] = {
     "INVALID_TYPE",
@@ -336,6 +699,8 @@ def get_config() -> ExplorerConfig:
                 if not isinstance(key, str) or not key:
                     continue
                 objects.append({"key": key, "hidden": bool(item.get("hidden"))})
+        alerts_payload = data.get("alerts") if isinstance(data, dict) else []
+        alerts = _sanitize_alert_entries(alerts_payload)
         view_mode_raw = data.get("viewMode") if isinstance(data, dict) else None
         view_mode = view_mode_raw if isinstance(view_mode_raw, str) else _DEFAULT_VIEW_MODE
         if view_mode not in _VALID_VIEW_MODES:
@@ -344,6 +709,7 @@ def get_config() -> ExplorerConfig:
         return ExplorerConfig(
             fields=result,
             objects=objects,
+            alerts=alerts,
             view_mode=view_mode,
             updated_at=updated_at,
         )
@@ -357,6 +723,7 @@ def save_config(config: ExplorerConfig) -> None:
             for item in config.objects
             if isinstance(item, dict) and item.get("key")
         ],
+        "alerts": config.get_alerts(),
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
     }
@@ -371,6 +738,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     existing = get_config()
     sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
+    sanitized_alerts: List[Dict[str, object]] = existing.get_alerts()
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
 
     fields_payload = payload.get("fields") if "fields" in payload else None
@@ -409,6 +777,10 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
             seen.add(key)
         sanitized_objects = objects
 
+    alerts_payload = payload.get("alerts") if "alerts" in payload else None
+    if isinstance(alerts_payload, Sequence) and not isinstance(alerts_payload, (str, bytes)):
+        sanitized_alerts = _sanitize_alert_entries(alerts_payload)
+
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -420,6 +792,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     config = ExplorerConfig(
         fields=sanitized_fields,
         objects=sanitized_objects,
+        alerts=sanitized_alerts,
         view_mode=view_mode,
         updated_at=timestamp,
     )
@@ -652,6 +1025,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         raise ValueError("no_valid_ids")
 
     config = get_config()
+    alert_definitions = config.get_alerts()
     results: Dict[str, List[Dict[str, object]]] = {}
     warnings: Dict[str, str] = {}
 
@@ -659,6 +1033,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     account_query_fields, account_display_fields = _build_query_fields(
         org, "Account", config
     )
+    object_display_fields: Dict[str, List[str]] = {"Account": account_display_fields}
     account_records: Dict[str, Dict[str, object]] = {}
     for chunk in _chunk(sanitized_ids, 100):
         soql = f"SELECT {', '.join(account_query_fields)} FROM Account WHERE Id IN ({_format_ids_for_soql(chunk)})"
@@ -684,6 +1059,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         definition = _OBJECT_DEFINITIONS[object_key]
         filter_field = definition["filter_field"]
         query_fields, display_fields = _build_query_fields(org, object_key, config)
+        object_display_fields[object_key] = display_fields
         records: List[Dict[str, object]] = []
         for chunk in _chunk(sanitized_ids, 100):
             if object_key in warnings:
@@ -698,6 +1074,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     contacts = results.get("Contact", [])
     individuals_config = _build_query_fields(org, "Individual", config)
     individual_query_fields, individual_display_fields = individuals_config
+    object_display_fields["Individual"] = individual_display_fields
     individual_ids: List[str] = []
     contact_ids: List[str] = []
     for contact in contacts:
@@ -728,6 +1105,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     for object_key in contact_point_objects:
         definition = _OBJECT_DEFINITIONS.get(object_key, {})
         query_fields, display_fields = _build_query_fields(org, object_key, config)
+        object_display_fields[object_key] = display_fields
         records_by_id: Dict[str, Dict[str, object]] = {}
         if "individual_field" in definition:
             raw_individual_field = definition.get("individual_field")
@@ -797,6 +1175,8 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
             individual_field=individual_field,
         )
 
+    alert_evaluators = _prepare_alert_evaluators(alert_definitions, warnings)
+
     contact_by_account = _map_records_by_field(contacts, "AccountId")
     individual_by_account = _aggregate_individuals_by_account(contacts, individual_records)
 
@@ -807,6 +1187,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         "accounts": [],
         "objects": configured_objects,
         "config": {key: config.get_fields(key) for key in _OBJECT_DEFINITIONS.keys()},
+        "alerts": alert_definitions,
         "summary": {},
     }
     if warnings:
@@ -819,22 +1200,23 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
 
     for account_id in sanitized_ids:
         account_record = account_records.get(account_id)
-        account_payload = {
+        account_payload: Dict[str, Any] = {
             "id": account_id,
             "fields": _record_to_field_list(
                 account_display_fields,
                 account_record or {},
                 extra_fields=_get_object_link_fields("Account"),
             ),
+            "alerts": [],
+            "alertCount": 0,
             "related": {},
         }
+        related_by_object: Dict[str, List[Dict[str, object]]] = {}
         for obj in configured_objects:
             key = obj["key"]
             definition = _OBJECT_DEFINITIONS.get(key, {})
-            _, display_fields = _build_query_fields(org, key, config)
-            related_records: List[Dict[str, object]]
             if key == "Contact":
-                related_records = contact_by_account.get(account_id, [])
+                related_records = list(contact_by_account.get(account_id, []))
             elif key in (
                 "BillingProfile__c",
                 "Contract",
@@ -844,7 +1226,9 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 "Sale__c",
             ):
                 filter_field = str(definition.get("filter_field", "AccountId"))
-                related_records = _filter_records_by_field(results.get(key, []), filter_field, account_id)
+                related_records = _filter_records_by_field(
+                    results.get(key, []), filter_field, account_id
+                )
             elif key == "Individual":
                 individual_ids_for_account = individual_by_account.get(account_id, set())
                 related_records = [
@@ -883,20 +1267,42 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                     related_records = deduped
             else:
                 related_records = []
-            payload_records = []
+            related_by_object[key] = related_records
+
+        account_alerts, record_alert_map = _evaluate_alerts_for_account(
+            account_record,
+            related_by_object,
+            alert_evaluators,
+        )
+        if account_alerts:
+            account_payload["alerts"] = account_alerts
+            account_payload["alertCount"] = sum(
+                int(alert.get("recordCount", 0) or 0) for alert in account_alerts
+            )
+
+        for obj in configured_objects:
+            key = obj["key"]
+            display_fields = object_display_fields.get(key)
+            if display_fields is None:
+                _, display_fields = _build_query_fields(org, key, config)
+                object_display_fields[key] = display_fields
+            related_records = related_by_object.get(key, [])
+            payload_records: List[Dict[str, Any]] = []
             for record in related_records:
                 if not record:
                     continue
-                payload_records.append(
-                    {
-                        "id": record.get("Id"),
-                        "fields": _record_to_field_list(
-                            display_fields,
-                            record,
-                            extra_fields=_get_object_link_fields(key),
-                        ),
-                    }
-                )
+                record_payload: Dict[str, Any] = {
+                    "id": record.get("Id"),
+                    "fields": _record_to_field_list(
+                        display_fields,
+                        record,
+                        extra_fields=_get_object_link_fields(key),
+                    ),
+                }
+                record_alerts = record_alert_map.get(id(record))
+                if record_alerts:
+                    record_payload["alerts"] = [dict(alert) for alert in record_alerts]
+                payload_records.append(record_payload)
             account_payload["related"][key] = payload_records
         explorer_data["accounts"].append(account_payload)
 

@@ -70,6 +70,27 @@
     return normalized;
   }
 
+  function cloneAlertEntries(raw) {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .filter((item) => item && typeof item === "object")
+      .map((item) => ({ ...item }));
+  }
+
+  function getDefaultAlertObjectKey(definitions) {
+    if (!Array.isArray(definitions) || !definitions.length) {
+      return "Account";
+    }
+    const visible = definitions.find((item) => item && !item.hidden);
+    if (visible && visible.key) {
+      return visible.key;
+    }
+    const fallback = definitions.find((item) => item && item.key);
+    return fallback && fallback.key ? fallback.key : "Account";
+  }
+
   function getFieldValue(fields, name) {
     if (!Array.isArray(fields) || !name) {
       return null;
@@ -155,6 +176,7 @@
     const accountFields = document.getElementById("account-explorer-account-fields");
     const accountRelated = document.getElementById("account-explorer-related");
     const accountEmpty = document.getElementById("account-explorer-account-empty");
+    const accountAlertsSummary = document.getElementById("account-explorer-account-alerts");
     const treeViewContainer = document.getElementById("account-explorer-tree-view");
     const treeToolbar = document.getElementById("account-explorer-tree-toolbar");
     const treeContent = document.getElementById("account-explorer-tree-content");
@@ -174,6 +196,8 @@
     const setupViewInputs = Array.from(
       document.querySelectorAll('input[name="account-explorer-setup-view"]')
     );
+    const setupAlertList = document.getElementById("account-explorer-alert-list");
+    const setupAlertAddButton = document.getElementById("account-explorer-alert-add");
 
     if (!parseButton || !clearButton || !previewList || !orgSelect) {
       return;
@@ -194,12 +218,23 @@
     if (!VIEW_MODES.has(configState.viewMode)) {
       configState.viewMode = DEFAULT_VIEW_MODE;
     }
+    configState.alerts = cloneAlertEntries(configState.alerts);
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
 
     let setupObjectsState = [];
     let setupViewMode = currentViewMode;
+    let setupAlertsState = [];
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
+    const setupAlertEditors = new Map();
+    let accountAlertTooltips = [];
+
+    function generateClientId() {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+      }
+      return `alert-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    }
     const fieldCache = new Map();
 
     function isObjectVisible(key) {
@@ -412,6 +447,153 @@
       });
     }
 
+    function hasAlertEntries(entry) {
+      return Array.isArray(entry?.alerts) && entry.alerts.length > 0;
+    }
+
+    function formatAlertTooltip(alert) {
+      if (!alert || typeof alert !== "object") {
+        return "";
+      }
+      const segments = [];
+      const name =
+        typeof alert.name === "string" && alert.name.trim()
+          ? alert.name.trim()
+          : translateKey("account_explorer.results.alert_default_name");
+      segments.push(name);
+      const objectLabel =
+        typeof alert.objectLabel === "string" && alert.objectLabel.trim()
+          ? alert.objectLabel.trim()
+          : typeof alert.object === "string"
+          ? alert.object
+          : "";
+      const recordCount =
+        typeof alert.recordCount === "number" && Number.isFinite(alert.recordCount)
+          ? alert.recordCount
+          : null;
+      if (objectLabel && recordCount !== null) {
+        segments.push(
+          translateKey("account_explorer.results.alert_record_summary", {
+            object: objectLabel,
+            count: recordCount,
+          })
+        );
+      } else if (objectLabel) {
+        segments.push(objectLabel);
+      }
+      const message =
+        typeof alert.message === "string" && alert.message.trim()
+          ? alert.message.trim()
+          : "";
+      if (message) {
+        segments.push(message);
+      }
+      return segments.join(" — ");
+    }
+
+    function renderRecordAlerts(container, alerts) {
+      if (!container || !Array.isArray(alerts) || !alerts.length) {
+        return;
+      }
+      const wrapper = document.createElement("div");
+      wrapper.className = "account-alert-badges d-flex flex-wrap gap-2 mb-2";
+      alerts.forEach((alert) => {
+        if (!alert || typeof alert !== "object") {
+          return;
+        }
+        const badge = document.createElement("span");
+        badge.className = "badge rounded-pill account-alert-badge";
+        const label =
+          typeof alert.name === "string" && alert.name.trim()
+            ? alert.name.trim()
+            : translateKey("account_explorer.results.alert_default_name");
+        badge.textContent = label;
+        const tooltip = formatAlertTooltip(alert);
+        if (tooltip) {
+          badge.title = tooltip;
+        }
+        wrapper.appendChild(badge);
+      });
+      if (wrapper.children.length) {
+        container.appendChild(wrapper);
+      }
+    }
+
+    function renderAccountAlertSummary(container, account) {
+      if (!container) {
+        return;
+      }
+      container.innerHTML = "";
+      if (!hasAlertEntries(account)) {
+        container.classList.add("d-none");
+        return;
+      }
+      container.classList.remove("d-none");
+      const heading = document.createElement("div");
+      heading.className = "text-danger fw-semibold mb-2";
+      heading.textContent = translateKey("account_explorer.results.alerts_heading");
+      container.appendChild(heading);
+      const list = document.createElement("div");
+      list.className = "d-flex flex-column gap-2";
+      account.alerts.forEach((alert) => {
+        if (!alert) {
+          return;
+        }
+        const item = document.createElement("div");
+        item.className = "account-alert-summary-item";
+        const title = document.createElement("div");
+        title.className = "fw-semibold";
+        title.textContent =
+          typeof alert.name === "string" && alert.name.trim()
+            ? alert.name.trim()
+            : translateKey("account_explorer.results.alert_default_name");
+        item.appendChild(title);
+        const detailsText = formatAlertTooltip(alert);
+        if (detailsText) {
+          const details = document.createElement("div");
+          details.className = "small text-muted";
+          details.textContent = detailsText;
+          item.appendChild(details);
+        }
+        list.appendChild(item);
+      });
+      container.appendChild(list);
+    }
+
+    function disposeAccountAlertTooltips() {
+      if (!Array.isArray(accountAlertTooltips)) {
+        accountAlertTooltips = [];
+        return;
+      }
+      accountAlertTooltips.forEach((tooltip) => {
+        if (tooltip && typeof tooltip.dispose === "function") {
+          tooltip.dispose();
+        }
+      });
+      accountAlertTooltips = [];
+    }
+
+    function applyAccountAlertTooltips() {
+      disposeAccountAlertTooltips();
+      if (typeof bootstrap === "undefined" || !accountList) {
+        return;
+      }
+      const triggers = accountList.querySelectorAll('[data-bs-toggle="tooltip"]');
+      triggers.forEach((trigger) => {
+        if (!trigger || !trigger.getAttribute("title")) {
+          return;
+        }
+        try {
+          const tooltip = new bootstrap.Tooltip(trigger, {
+            trigger: "hover focus",
+          });
+          accountAlertTooltips.push(tooltip);
+        } catch (error) {
+          // ignore bootstrap errors
+        }
+      });
+    }
+
     function getAccountById(accountId) {
       if (
         !explorerResult ||
@@ -454,10 +636,26 @@
             }
             const card = document.createElement("div");
             card.className = "border rounded p-2 mb-2";
+            let alertsContainer = null;
+            if (hasAlertEntries(record)) {
+              card.classList.add("account-alert-card");
+              const tooltipText = record.alerts
+                .map((alert) => formatAlertTooltip(alert))
+                .filter(Boolean)
+                .join(" • ");
+              if (tooltipText) {
+                card.title = tooltipText;
+              }
+              alertsContainer = document.createElement("div");
+              renderRecordAlerts(alertsContainer, record.alerts);
+            }
             const badge = document.createElement("div");
             badge.className = "badge bg-light text-secondary mb-2";
             badge.textContent = record.id || translateKey("account_explorer.results.no_id");
             card.appendChild(badge);
+            if (alertsContainer && alertsContainer.childNodes.length) {
+              card.appendChild(alertsContainer);
+            }
             const dl = document.createElement("dl");
             dl.className = "row mb-0 small";
             renderFieldList(dl, record.fields || []);
@@ -472,6 +670,16 @@
     function createRecordCard(record, objectKey) {
       const card = document.createElement("div");
       card.className = "border rounded p-2 mb-2";
+      if (hasAlertEntries(record)) {
+        card.classList.add("account-alert-card");
+        const tooltipText = record.alerts
+          .map((alert) => formatAlertTooltip(alert))
+          .filter(Boolean)
+          .join(" • ");
+        if (tooltipText) {
+          card.title = tooltipText;
+        }
+      }
       const header = document.createElement("div");
       header.className = "d-flex justify-content-between align-items-start mb-2";
       const title = document.createElement("div");
@@ -486,6 +694,9 @@
         header.appendChild(badge);
       }
       card.appendChild(header);
+      if (hasAlertEntries(record)) {
+        renderRecordAlerts(card, record.alerts);
+      }
       const dl = document.createElement("dl");
       dl.className = "row mb-0 small";
       renderFieldList(dl, record.fields || []);
@@ -534,6 +745,9 @@
       }
       const node = document.createElement("div");
       const classes = ["account-tree-node", getTreeNodeTypeClass(objectKey)];
+      if (hasAlertEntries(record)) {
+        classes.push("account-tree-node--alert");
+      }
       node.className = classes.filter(Boolean).join(" ");
       if (objectKey) {
         node.dataset.objectKey = objectKey;
@@ -543,6 +757,15 @@
         badge.className = "account-tree-node__badge";
         badge.textContent = label;
         node.appendChild(badge);
+      }
+      if (hasAlertEntries(record)) {
+        const tooltipText = record.alerts
+          .map((alert) => formatAlertTooltip(alert))
+          .filter(Boolean)
+          .join(" • ");
+        if (tooltipText) {
+          node.title = tooltipText;
+        }
       }
       const title = document.createElement("div");
       title.className = "account-tree-node__title";
@@ -778,6 +1001,16 @@
         meta.className = "account-tree-header__meta text-muted";
         meta.textContent = account.id;
         header.appendChild(meta);
+      }
+      if (hasAlertEntries(account)) {
+        header.classList.add("account-tree-header--alert");
+        const tooltipText = account.alerts
+          .map((alert) => formatAlertTooltip(alert))
+          .filter(Boolean)
+          .join(" • ");
+        if (tooltipText) {
+          header.title = tooltipText;
+        }
       }
       return header;
     }
@@ -1034,11 +1267,25 @@
       if (!account) {
         accountDetails.classList.add("d-none");
         accountEmpty.classList.remove("d-none");
+        if (accountAlertsSummary) {
+          accountAlertsSummary.classList.add("d-none");
+          accountAlertsSummary.innerHTML = "";
+        }
+        if (accountHeading) {
+          accountHeading.classList.remove("text-danger");
+        }
+        accountDetails.classList.remove("account-alert-card");
         return;
       }
       accountEmpty.classList.add("d-none");
       accountDetails.classList.remove("d-none");
       accountHeading.textContent = getAccountDisplayName(account) || account.id;
+      if (accountAlertsSummary) {
+        renderAccountAlertSummary(accountAlertsSummary, account);
+      }
+      const accountHasAlerts = hasAlertEntries(account);
+      accountHeading.classList.toggle("text-danger", accountHasAlerts);
+      accountDetails.classList.toggle("account-alert-card", accountHasAlerts);
       renderFieldList(accountFields, account.fields || []);
       renderRelatedSection(accountRelated, account.related || {});
     }
@@ -1091,6 +1338,12 @@
         objectDefinitions = normalizeObjectDefinitions(result.data.objects);
         window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
       }
+      if (result && result.data && Array.isArray(result.data.alerts)) {
+        configState.alerts = cloneAlertEntries(result.data.alerts);
+        if (typeof window.ACCOUNT_EXPLORER_CONFIG === "object") {
+          window.ACCOUNT_EXPLORER_CONFIG.alerts = cloneAlertEntries(result.data.alerts);
+        }
+      }
       if (!result || !result.data || !Array.isArray(result.data.accounts) || !result.data.accounts.length) {
         resultsContainer.classList.add("d-none");
         resultsPlaceholder.classList.remove("d-none");
@@ -1109,12 +1362,14 @@
         } else {
           setStatus("", "muted");
         }
+        disposeAccountAlertTooltips();
         renderTree(null);
         return;
       }
       resultsPlaceholder.classList.add("d-none");
       resultsContainer.classList.remove("d-none");
       const accounts = result.data.accounts;
+      disposeAccountAlertTooltips();
       accountList.innerHTML = "";
       accounts.forEach((account) => {
         const button = document.createElement("button");
@@ -1124,6 +1379,26 @@
         const title = document.createElement("div");
         title.className = "fw-semibold";
         title.textContent = getAccountDisplayName(account);
+        if (hasAlertEntries(account)) {
+          button.classList.add("account-alert-item");
+          const alertCount =
+            typeof account.alertCount === "number" && Number.isFinite(account.alertCount)
+              ? account.alertCount
+              : account.alerts.length;
+          const indicator = document.createElement("span");
+          indicator.className = "badge account-alert-indicator";
+          indicator.textContent = String(alertCount);
+          title.appendChild(indicator);
+          const tooltipText = account.alerts
+            .map((alert) => formatAlertTooltip(alert))
+            .filter(Boolean)
+            .join(" • ");
+          if (tooltipText) {
+            button.dataset.bsToggle = "tooltip";
+            button.dataset.bsPlacement = "right";
+            button.setAttribute("title", tooltipText);
+          }
+        }
         const subtitle = document.createElement("div");
         subtitle.className = "small text-muted";
         subtitle.textContent = account.id;
@@ -1134,6 +1409,7 @@
         });
         accountList.appendChild(button);
       });
+      applyAccountAlertTooltips();
       if (!selectedAccountId || !accounts.some((item) => item.id === selectedAccountId)) {
         selectedAccountId = accounts[0]?.id || null;
       }
@@ -1560,6 +1836,294 @@
       });
     }
 
+    function createBlankAlertEntry() {
+      return {
+        id: null,
+        clientId: generateClientId(),
+        name: "",
+        object: getDefaultAlertObjectKey(objectDefinitions),
+        expression: "",
+        description: "",
+      };
+    }
+
+    function renderSetupAlerts() {
+      if (!setupAlertList) {
+        return;
+      }
+      setupAlertEditors.clear();
+      setupAlertList.innerHTML = "";
+      if (!setupAlertsState.length) {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey("account_explorer.setup.alerts_empty");
+        setupAlertList.appendChild(empty);
+        return;
+      }
+      setupAlertsState.forEach((entry, index) => {
+        const item = document.createElement("div");
+        item.className = "account-setup-alert border rounded p-3";
+        item.dataset.alertId = entry.clientId;
+
+        const header = document.createElement("div");
+        header.className = "d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3";
+        const nameGroup = document.createElement("div");
+        nameGroup.className = "flex-grow-1";
+        const nameLabel = document.createElement("label");
+        nameLabel.className = "form-label";
+        nameLabel.textContent = translateKey("account_explorer.setup.alerts_name_label");
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.className = "form-control";
+        nameInput.placeholder = translateKey("account_explorer.setup.alerts_name_placeholder");
+        nameInput.value = entry.name || "";
+        nameInput.addEventListener("input", (event) => {
+          setupAlertsState[index].name = event.target.value;
+        });
+        nameGroup.appendChild(nameLabel);
+        nameGroup.appendChild(nameInput);
+        header.appendChild(nameGroup);
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "btn btn-outline-danger btn-sm";
+        removeButton.textContent = translateKey("account_explorer.setup.alerts_remove");
+        removeButton.addEventListener("click", () => {
+          setupAlertsState = setupAlertsState.filter(
+            (alert) => alert.clientId !== entry.clientId
+          );
+          renderSetupAlerts();
+        });
+        header.appendChild(removeButton);
+        item.appendChild(header);
+
+        const row = document.createElement("div");
+        row.className = "row g-3 align-items-start";
+
+        const objectCol = document.createElement("div");
+        objectCol.className = "col-lg-4";
+        const objectLabel = document.createElement("label");
+        objectLabel.className = "form-label";
+        objectLabel.textContent = translateKey("account_explorer.setup.alerts_object_label");
+        const objectSelect = document.createElement("select");
+        objectSelect.className = "form-select";
+        const availableObjects = objectDefinitions.length
+          ? objectDefinitions
+          : [{ key: "Account", label: "Account" }];
+        availableObjects.forEach((definition) => {
+          const option = document.createElement("option");
+          option.value = definition.key;
+          option.textContent = definition.label;
+          objectSelect.appendChild(option);
+        });
+        const fallbackObject = getDefaultAlertObjectKey(availableObjects);
+        const currentObject = availableObjects.some((definition) => definition.key === entry.object)
+          ? entry.object
+          : fallbackObject;
+        objectSelect.value = currentObject;
+        setupAlertsState[index].object = currentObject;
+        objectSelect.addEventListener("change", (event) => {
+          setupAlertsState[index].object = event.target.value;
+          const editor = setupAlertEditors.get(entry.clientId);
+          if (editor) {
+            renderAlertFieldSuggestions(
+              setupAlertsState[index],
+              editor.suggestions,
+              editor.textarea
+            );
+          }
+        });
+        objectCol.appendChild(objectLabel);
+        objectCol.appendChild(objectSelect);
+        row.appendChild(objectCol);
+
+        const expressionCol = document.createElement("div");
+        expressionCol.className = "col-lg-8";
+        const expressionLabel = document.createElement("label");
+        expressionLabel.className = "form-label";
+        expressionLabel.textContent = translateKey("account_explorer.setup.alerts_expression_label");
+        const expressionInput = document.createElement("textarea");
+        expressionInput.className = "form-control";
+        expressionInput.rows = 3;
+        expressionInput.placeholder = translateKey(
+          "account_explorer.setup.alerts_expression_placeholder"
+        );
+        expressionInput.value = entry.expression || "";
+        expressionInput.addEventListener("input", (event) => {
+          setupAlertsState[index].expression = event.target.value;
+        });
+        expressionCol.appendChild(expressionLabel);
+        expressionCol.appendChild(expressionInput);
+        const expressionHelp = document.createElement("div");
+        expressionHelp.className = "form-text";
+        expressionHelp.textContent = translateKey("account_explorer.setup.alerts_expression_help");
+        expressionCol.appendChild(expressionHelp);
+        const suggestionsContainer = document.createElement("div");
+        suggestionsContainer.className = "account-alert-suggestions mt-2";
+        expressionCol.appendChild(suggestionsContainer);
+        row.appendChild(expressionCol);
+
+        item.appendChild(row);
+
+        const descriptionGroup = document.createElement("div");
+        descriptionGroup.className = "mt-3";
+        const descriptionLabel = document.createElement("label");
+        descriptionLabel.className = "form-label";
+        descriptionLabel.textContent = translateKey(
+          "account_explorer.setup.alerts_description_label"
+        );
+        const descriptionInput = document.createElement("input");
+        descriptionInput.type = "text";
+        descriptionInput.className = "form-control";
+        descriptionInput.placeholder = translateKey(
+          "account_explorer.setup.alerts_description_placeholder"
+        );
+        descriptionInput.value = entry.description || "";
+        descriptionInput.addEventListener("input", (event) => {
+          setupAlertsState[index].description = event.target.value;
+        });
+        descriptionGroup.appendChild(descriptionLabel);
+        descriptionGroup.appendChild(descriptionInput);
+        item.appendChild(descriptionGroup);
+
+        setupAlertList.appendChild(item);
+        setupAlertEditors.set(entry.clientId, {
+          suggestions: suggestionsContainer,
+          textarea: expressionInput,
+        });
+        renderAlertFieldSuggestions(entry, suggestionsContainer, expressionInput);
+      });
+    }
+
+    function renderAlertFieldSuggestions(entry, container, expressionInput) {
+      if (!container) {
+        return;
+      }
+      container.innerHTML = "";
+      const objectKey =
+        typeof entry?.object === "string" && entry.object.trim()
+          ? entry.object.trim()
+          : "Account";
+      if (!setupOrgSelect || !setupOrgSelect.value) {
+        const message = document.createElement("div");
+        message.className = "text-muted small";
+        message.textContent = translateKey("account_explorer.setup.alerts_field_help");
+        container.appendChild(message);
+        return;
+      }
+      const cacheKey = `${setupOrgSelect.value}:${objectKey}`;
+      const applyFields = (fields) => {
+        container.innerHTML = "";
+        if (!Array.isArray(fields) || !fields.length) {
+          const empty = document.createElement("div");
+          empty.className = "text-muted small";
+          empty.textContent = translateKey("account_explorer.setup.alerts_no_fields");
+          container.appendChild(empty);
+          return;
+        }
+        const label = document.createElement("div");
+        label.className = "small text-muted mb-2";
+        label.textContent = translateKey("account_explorer.setup.alerts_field_suggestions");
+        container.appendChild(label);
+        const group = document.createElement("div");
+        group.className = "d-flex flex-wrap gap-2";
+        fields.forEach((field) => {
+          if (!field || typeof field !== "object") {
+            return;
+          }
+          const fieldName = typeof field.name === "string" ? field.name : "";
+          if (!fieldName) {
+            return;
+          }
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "btn btn-outline-secondary btn-sm";
+          button.textContent = fieldName;
+          if (field.label) {
+            button.title = `${field.label} (${fieldName})`;
+          }
+          button.addEventListener("click", () => {
+            replaceFieldTokenAtCursor(expressionInput, fieldName);
+            expressionInput.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+          group.appendChild(button);
+        });
+        container.appendChild(group);
+      };
+      if (fieldCache.has(cacheKey)) {
+        applyFields(fieldCache.get(cacheKey) || []);
+        return;
+      }
+      const loading = document.createElement("div");
+      loading.className = "text-muted small";
+      loading.textContent = translateKey("account_explorer.setup.alerts_loading_fields");
+      container.appendChild(loading);
+      fetch(
+        `/api/account-explorer/fields?org_id=${encodeURIComponent(
+          setupOrgSelect.value
+        )}&object=${encodeURIComponent(objectKey)}`
+      )
+        .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) {
+            throw new Error("fields_failed");
+          }
+          const fields = Array.isArray(data?.fields) ? data.fields : [];
+          fieldCache.set(cacheKey, fields);
+          applyFields(fields);
+        })
+        .catch(() => {
+          container.innerHTML = "";
+          const message = document.createElement("div");
+          message.className = "text-muted small";
+          message.textContent = translateKey("frontend.account_explorer.fields_failed");
+          container.appendChild(message);
+          showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+        });
+    }
+
+    function refreshAllAlertSuggestions() {
+      setupAlertEditors.forEach((editor, clientId) => {
+        const entry = setupAlertsState.find((alert) => alert.clientId === clientId);
+        if (!entry) {
+          return;
+        }
+        renderAlertFieldSuggestions(entry, editor.suggestions, editor.textarea);
+      });
+    }
+
+    function gatherSetupAlerts() {
+      return setupAlertsState
+        .map((entry) => {
+          const objectKey =
+            typeof entry.object === "string" && entry.object.trim()
+              ? entry.object.trim()
+              : "";
+          const expression =
+            typeof entry.expression === "string" && entry.expression.trim()
+              ? entry.expression.trim()
+              : "";
+          if (!objectKey || !expression) {
+            return null;
+          }
+          const payload = {
+            object: objectKey,
+            expression,
+          };
+          if (typeof entry.id === "string" && entry.id.trim()) {
+            payload.id = entry.id.trim();
+          }
+          if (typeof entry.name === "string" && entry.name.trim()) {
+            payload.name = entry.name.trim();
+          }
+          if (typeof entry.description === "string" && entry.description.trim()) {
+            payload.description = entry.description.trim();
+          }
+          return payload;
+        })
+        .filter(Boolean);
+    }
+
     function populateSetupFieldValues() {
       setupFieldInputs.forEach((inputs, objectKey) => {
         const values = Array.isArray(configState?.fields?.[objectKey])
@@ -1574,8 +2138,25 @@
     function openSetupModal() {
       setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
       setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
+      setupAlertsState = Array.isArray(configState?.alerts)
+        ? configState.alerts.map((alert) => ({
+            id: typeof alert.id === "string" ? alert.id : null,
+            clientId:
+              typeof alert.id === "string" && alert.id
+                ? alert.id
+                : generateClientId(),
+            name: typeof alert.name === "string" ? alert.name : "",
+            object:
+              typeof alert.object === "string" && alert.object
+                ? alert.object
+                : getDefaultAlertObjectKey(objectDefinitions),
+            expression: typeof alert.expression === "string" ? alert.expression : "",
+            description: typeof alert.description === "string" ? alert.description : "",
+          }))
+        : [];
       renderSetupObjectList();
       renderSetupFields();
+      renderSetupAlerts();
       populateSetupFieldValues();
       setupViewInputs.forEach((input) => {
         input.checked = input.value === setupViewMode;
@@ -1595,6 +2176,7 @@
           key: item.key,
           hidden: Boolean(item.hidden),
         })),
+        alerts: gatherSetupAlerts(),
         viewMode: setupViewMode,
       };
       fetch("/api/account-explorer/config", {
@@ -1612,22 +2194,42 @@
             throw new Error("save_failed");
           }
           configState = data?.config ? { ...data.config } : configState;
+          configState.alerts = cloneAlertEntries(configState.alerts);
           objectDefinitions = normalizeObjectDefinitions(
             data?.connectedObjects || objectDefinitions
           );
           window.ACCOUNT_EXPLORER_CONFIG = configState;
           window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
           setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
+          setupAlertsState = Array.isArray(configState.alerts)
+            ? configState.alerts.map((alert) => ({
+                id: typeof alert.id === "string" ? alert.id : null,
+                clientId:
+                  typeof alert.id === "string" && alert.id
+                    ? alert.id
+                    : generateClientId(),
+                name: typeof alert.name === "string" ? alert.name : "",
+                object:
+                  typeof alert.object === "string" && alert.object
+                    ? alert.object
+                    : getDefaultAlertObjectKey(objectDefinitions),
+                expression: typeof alert.expression === "string" ? alert.expression : "",
+                description:
+                  typeof alert.description === "string" ? alert.description : "",
+              }))
+            : [];
           populateSetupFieldValues();
           renderSetupObjectList();
           setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
           setupViewInputs.forEach((input) => {
             input.checked = input.value === setupViewMode;
           });
+          renderSetupAlerts();
           setSetupStatus(translateKey("account_explorer.setup.saved"), "success");
           showToast(translateKey("frontend.account_explorer.config_saved"), "success");
           if (explorerResult && explorerResult.data) {
             explorerResult.data.objects = objectDefinitions;
+            explorerResult.data.alerts = cloneAlertEntries(configState.alerts || []);
             renderResults(explorerResult);
           } else {
             renderTree(selectedAccountId ? getAccountById(selectedAccountId) : null);
@@ -1685,6 +2287,26 @@
     if (setupSaveButton) {
       setupSaveButton.addEventListener("click", saveSetupConfiguration);
     }
+    if (setupAlertAddButton) {
+      setupAlertAddButton.addEventListener("click", () => {
+        const entry = createBlankAlertEntry();
+        setupAlertsState.push(entry);
+        renderSetupAlerts();
+        if (typeof window.requestAnimationFrame === "function") {
+          window.requestAnimationFrame(() => {
+            if (!setupAlertList) {
+              return;
+            }
+            const nameInput = setupAlertList.querySelector(
+              `[data-alert-id="${entry.clientId}"] input.form-control`
+            );
+            if (nameInput instanceof HTMLInputElement) {
+              nameInput.focus();
+            }
+          });
+        }
+      });
+    }
     if (setupObjectList) {
       setupObjectList.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-action]");
@@ -1741,6 +2363,7 @@
     if (setupOrgSelect) {
       setupOrgSelect.addEventListener("change", () => {
         fieldCache.clear();
+        refreshAllAlertSuggestions();
       });
     }
     setupViewInputs.forEach((input) => {

@@ -645,3 +645,105 @@ body.theme-sci-fi {
   tab-size: 2;
 }
 
+.account-alert-card {
+  border-color: rgba(220, 53, 69, 0.35) !important;
+  background: linear-gradient(135deg, rgba(220, 53, 69, 0.08), rgba(220, 53, 69, 0.02));
+  box-shadow: 0 1rem 2rem rgba(220, 53, 69, 0.12);
+}
+
+.theme-dark .account-alert-card,
+.theme-sci-fi .account-alert-card {
+  background-color: rgba(220, 53, 69, 0.15);
+  border-color: rgba(248, 215, 218, 0.45) !important;
+  box-shadow: 0 1rem 2rem rgba(220, 53, 69, 0.35);
+}
+
+.account-alert-badge {
+  background-color: rgba(220, 53, 69, 0.15);
+  color: #842029;
+  border: 1px solid rgba(220, 53, 69, 0.3);
+  font-weight: 600;
+}
+
+.theme-dark .account-alert-badge,
+.theme-sci-fi .account-alert-badge {
+  color: #f8d7da;
+  background-color: rgba(220, 53, 69, 0.25);
+  border-color: rgba(220, 53, 69, 0.45);
+}
+
+.account-alert-item {
+  position: relative;
+  border-left: 4px solid rgba(220, 53, 69, 0.55);
+}
+
+.account-alert-indicator {
+  background-color: #dc3545;
+  color: #fff;
+  font-size: 0.7rem;
+  margin-left: 0.5rem;
+}
+
+.account-alert-summary-item {
+  border-left: 4px solid #dc3545;
+  background-color: rgba(220, 53, 69, 0.08);
+  padding: 0.75rem 0.75rem 0.75rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.account-alert-summary-item .small {
+  color: rgba(33, 37, 41, 0.75);
+}
+
+.theme-dark .account-alert-summary-item,
+.theme-sci-fi .account-alert-summary-item {
+  background-color: rgba(220, 53, 69, 0.18);
+}
+
+.account-tree-node--alert {
+  border-color: rgba(220, 53, 69, 0.45);
+  box-shadow: 0 1.5rem 3rem rgba(220, 53, 69, 0.2);
+}
+
+.theme-dark .account-tree-node--alert,
+.theme-sci-fi .account-tree-node--alert {
+  border-color: rgba(248, 215, 218, 0.45);
+  box-shadow: 0 1.5rem 3.5rem rgba(220, 53, 69, 0.35);
+}
+
+.account-tree-header--alert .account-tree-header__title {
+  color: #dc3545;
+}
+
+.account-tree-header--alert .account-tree-header__meta {
+  color: rgba(220, 53, 69, 0.8);
+}
+
+.account-alert-suggestions {
+  border: 1px dashed rgba(13, 110, 253, 0.35);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background-color: rgba(13, 110, 253, 0.06);
+}
+
+.account-alert-suggestions .btn {
+  font-size: 0.75rem;
+}
+
+.theme-dark .account-alert-suggestions,
+.theme-sci-fi .account-alert-suggestions {
+  background-color: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.account-setup-alert {
+  background-color: var(--bs-body-bg, #ffffff);
+  box-shadow: 0 0.75rem 1.75rem rgba(15, 23, 42, 0.08);
+}
+
+.theme-dark .account-setup-alert,
+.theme-sci-fi .account-setup-alert {
+  background-color: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 0.75rem 1.75rem rgba(15, 23, 42, 0.45);
+}
+
