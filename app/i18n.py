@@ -411,6 +411,15 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "download_unavailable": "Run the explorer before downloading.",
                 "orgs_failed": "Unable to load org list.",
                 "fields_failed": "Unable to load fields for suggestions.",
+                "run": {
+                    "org_placeholder": "Select an org",
+                    "generated_at": "Data generated {timestamp}",
+                },
+                "results": {
+                    "empty_object": "No related records found.",
+                    "account_label": "Account",
+                    "accounts_badge": "{count} accounts",
+                },
                 "config_saved": "Explorer configuration saved.",
                 "config_failed": "Unable to save the explorer configuration.",
                 "errors": {
@@ -827,6 +836,15 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "download_unavailable": "Esegui l'esplorazione prima di scaricare.",
                 "orgs_failed": "Impossibile caricare l'elenco delle organizzazioni.",
                 "fields_failed": "Impossibile caricare i campi per i suggerimenti.",
+                "run": {
+                    "org_placeholder": "Seleziona un'organizzazione",
+                    "generated_at": "Dati generati {timestamp}",
+                },
+                "results": {
+                    "empty_object": "Nessun record correlato trovato.",
+                    "account_label": "Account",
+                    "accounts_badge": "{count} account",
+                },
                 "config_saved": "Configurazione esploratore salvata.",
                 "config_failed": "Impossibile salvare la configurazione dell'esploratore.",
                 "errors": {
