@@ -531,11 +531,54 @@ def _build_query_fields(org: OrgConfig, object_key: str, config: ExplorerConfig)
     return query_fields, ["Id"] + sanitized_display
 
 
-def _record_to_field_list(fields: Sequence[str], record: Dict[str, object]) -> List[Dict[str, object]]:
+def _record_to_field_list(
+    fields: Sequence[str],
+    record: Dict[str, object],
+    *,
+    extra_fields: Optional[Sequence[str]] = None,
+) -> List[Dict[str, object]]:
     payload: List[Dict[str, object]] = []
-    for field in fields:
-        payload.append({"name": field, "value": record.get(field)})
+    record = record or {}
+    base_fields: List[str] = [field for field in fields]
+    hidden_fields: Set[str] = set()
+    if extra_fields:
+        for field in extra_fields:
+            if not isinstance(field, str) or not field:
+                continue
+            if field not in base_fields:
+                base_fields.append(field)
+                hidden_fields.add(field)
+    for field in base_fields:
+        entry: Dict[str, object] = {"name": field, "value": record.get(field)}
+        if field in hidden_fields:
+            entry["hidden"] = True
+        payload.append(entry)
     return payload
+
+
+def _get_object_link_fields(object_key: str) -> List[str]:
+    definition = _OBJECT_DEFINITIONS.get(object_key, {})
+    link_fields: List[str] = []
+    for field_name in definition.get("required_fields", []) or []:
+        if isinstance(field_name, str) and field_name and field_name not in link_fields:
+            link_fields.append(field_name)
+    extra_candidates = [
+        definition.get("filter_field"),
+        definition.get("contact_field"),
+        definition.get("individual_field"),
+    ]
+    for candidate in extra_candidates:
+        if isinstance(candidate, str) and candidate and candidate not in link_fields:
+            link_fields.append(candidate)
+    if object_key in ("ContactPointPhone", "ContactPointEmail"):
+        for candidate in ("ContactId", "Contact__c", "ParentId", "IndividualId", "Individual__c"):
+            if candidate not in link_fields:
+                link_fields.append(candidate)
+    if object_key == "AccountContactRelation":
+        for candidate in ("AccountId", "ContactId"):
+            if candidate not in link_fields:
+                link_fields.append(candidate)
+    return link_fields
 
 
 def _filter_records_by_field(records: Sequence[Dict[str, object]], field_name: str, target_value: str) -> List[Dict[str, object]]:
@@ -778,7 +821,11 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         account_record = account_records.get(account_id)
         account_payload = {
             "id": account_id,
-            "fields": _record_to_field_list(account_display_fields, account_record or {}),
+            "fields": _record_to_field_list(
+                account_display_fields,
+                account_record or {},
+                extra_fields=_get_object_link_fields("Account"),
+            ),
             "related": {},
         }
         for obj in configured_objects:
@@ -843,7 +890,11 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 payload_records.append(
                     {
                         "id": record.get("Id"),
-                        "fields": _record_to_field_list(display_fields, record),
+                        "fields": _record_to_field_list(
+                            display_fields,
+                            record,
+                            extra_fields=_get_object_link_fields(key),
+                        ),
                     }
                 )
             account_payload["related"][key] = payload_records
