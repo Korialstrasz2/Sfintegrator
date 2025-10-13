@@ -153,6 +153,9 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "no_fields": "No fields configured.",
                 "no_id": "No Id",
                 "no_objects": "No objects selected for display.",
+                "open_wide_tree": "Open wide tree view in new tab",
+                "tree_tab_title": "{account} — Tree view",
+                "account_label": "Account",
                 "view": {
                     "label": "Results view",
                     "list": "List",
@@ -566,6 +569,9 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "no_fields": "Nessun campo configurato.",
                 "no_id": "Nessun Id",
                 "no_objects": "Nessun oggetto selezionato per la visualizzazione.",
+                "open_wide_tree": "Apri vista albero ampia in una nuova scheda",
+                "tree_tab_title": "{account} — Vista albero",
+                "account_label": "Account",
                 "view": {
                     "label": "Vista risultati",
                     "list": "Elenco",
