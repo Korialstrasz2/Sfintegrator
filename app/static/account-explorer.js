@@ -596,6 +596,10 @@
       }
       if (children.length) {
         branch.classList.add("account-tree-branch--has-children");
+        node.classList.add("account-tree-node--collapsible");
+        if (!node.hasAttribute("tabindex")) {
+          node.setAttribute("tabindex", "0");
+        }
       }
       branch.appendChild(node);
       if (children.length) {
@@ -630,9 +634,6 @@
           return;
         }
         const records = entry.records.get(recordId) || [];
-        if (!records.length) {
-          return;
-        }
         const groupNode = createTreeGroupNode(context.getLabel(entry.key), records.length, {
           objectKey: entry.key,
           variant: "contact-point",
@@ -648,7 +649,16 @@
             return buildTreeBranch(recordNode);
           })
           .filter(Boolean);
-        branches.push(buildTreeBranch(groupNode, recordBranches));
+        const childrenBranches = recordBranches.length
+          ? recordBranches
+          : [
+              buildTreeBranch(
+                createTreeEmptyNode(
+                  translateKey("account_explorer.results.empty_object")
+                )
+              ),
+            ];
+        branches.push(buildTreeBranch(groupNode, childrenBranches));
       });
       return branches;
     }
@@ -662,22 +672,29 @@
 
       if (context.isObjectVisible("AccountContactRelation")) {
         const relations = context.contactRelationsByContact.get(contactId) || [];
-        if (relations.length) {
-          const groupNode = createTreeGroupNode(
-            context.getLabel("AccountContactRelation"),
-            relations.length,
-            { objectKey: "AccountContactRelation", variant: "relation" }
-          );
-          const relationBranches = relations
-            .map((relation) => {
-              const relationNode = createTreeRecordNode(relation, "AccountContactRelation", {
-                label: context.getLabel("AccountContactRelation"),
-              });
-              return buildTreeBranch(relationNode);
-            })
-            .filter(Boolean);
-          children.push(buildTreeBranch(groupNode, relationBranches));
-        }
+        const groupNode = createTreeGroupNode(
+          context.getLabel("AccountContactRelation"),
+          relations.length,
+          { objectKey: "AccountContactRelation", variant: "relation" }
+        );
+        const relationBranches = relations
+          .map((relation) => {
+            const relationNode = createTreeRecordNode(relation, "AccountContactRelation", {
+              label: context.getLabel("AccountContactRelation"),
+            });
+            return buildTreeBranch(relationNode);
+          })
+          .filter(Boolean);
+        const childrenBranches = relationBranches.length
+          ? relationBranches
+          : [
+              buildTreeBranch(
+                createTreeEmptyNode(
+                  translateKey("account_explorer.results.empty_object")
+                )
+              ),
+            ];
+        children.push(buildTreeBranch(groupNode, childrenBranches));
       }
 
       if (context.isObjectVisible("Individual")) {
@@ -721,9 +738,6 @@
         return null;
       }
       const records = Array.isArray(related[key]) ? related[key] : [];
-      if (!records.length) {
-        return null;
-      }
       const groupNode = createTreeGroupNode(definition.label, records.length, {
         objectKey: key,
         variant: key === "Contact" ? "contact" : undefined,
@@ -731,13 +745,16 @@
       const recordBranches = records
         .map((recordItem) => buildRecordBranch(recordItem, key, context))
         .filter(Boolean);
-      if (!recordBranches.length) {
-        const emptyNode = createTreeEmptyNode(
-          translateKey("account_explorer.results.empty_object")
-        );
-        return buildTreeBranch(groupNode, [buildTreeBranch(emptyNode)]);
-      }
-      return buildTreeBranch(groupNode, recordBranches);
+      const childrenBranches = recordBranches.length
+        ? recordBranches
+        : [
+            buildTreeBranch(
+              createTreeEmptyNode(
+                translateKey("account_explorer.results.empty_object")
+              )
+            ),
+          ];
+      return buildTreeBranch(groupNode, childrenBranches);
     }
 
     function createTreeHeader(account) {
@@ -883,6 +900,33 @@
       latestTreeContext = context;
     }
 
+    function toggleTreeBranch(branch, forceState) {
+      if (!branch || !branch.classList.contains("account-tree-branch--has-children")) {
+        return;
+      }
+      if (typeof forceState === "boolean") {
+        branch.classList.toggle("account-tree-branch--collapsed", forceState);
+        return;
+      }
+      branch.classList.toggle("account-tree-branch--collapsed");
+    }
+
+    function handleTreeNodeInteraction(event) {
+      const node = event.target.closest(".account-tree-node--collapsible");
+      if (!node) {
+        return;
+      }
+      if (event.type === "keydown") {
+        const key = event.key;
+        if (key !== "Enter" && key !== " ") {
+          return;
+        }
+        event.preventDefault();
+      }
+      const branch = node.closest(".account-tree-branch");
+      toggleTreeBranch(branch);
+    }
+
     function openTreeInNewTab() {
       if (!latestTreeAccount || !latestTreeContext) {
         return;
@@ -941,6 +985,37 @@
     <div class="account-tree-full-wrapper">
       ${htmlContent}
     </div>
+    <script>
+      (function () {
+        function toggleBranch(branch, force) {
+          if (!branch || !branch.classList.contains('account-tree-branch--has-children')) {
+            return;
+          }
+          if (typeof force === 'boolean') {
+            branch.classList.toggle('account-tree-branch--collapsed', force);
+            return;
+          }
+          branch.classList.toggle('account-tree-branch--collapsed');
+        }
+        function onInteract(event) {
+          const node = event.target.closest('.account-tree-node--collapsible');
+          if (!node) {
+            return;
+          }
+          if (event.type === 'keydown') {
+            const key = event.key;
+            if (key !== 'Enter' && key !== ' ') {
+              return;
+            }
+            event.preventDefault();
+          }
+          const branch = node.closest('.account-tree-branch');
+          toggleBranch(branch);
+        }
+        document.addEventListener('click', onInteract);
+        document.addEventListener('keydown', onInteract);
+      })();
+    </script>
   </body>
 </html>`);
       treeWindow.document.close();
@@ -1592,9 +1667,11 @@
     }
 
     if (openTreeTabButton) {
-      openTreeTabButton.addEventListener("click", () => {
-        openTreeInNewTab();
-      });
+      openTreeTabButton.addEventListener("click", openTreeInNewTab);
+    }
+    if (treeContent) {
+      treeContent.addEventListener("click", handleTreeNodeInteraction);
+      treeContent.addEventListener("keydown", handleTreeNodeInteraction);
     }
     if (setupButton && setupModalEl) {
       setupModalEl.addEventListener("show.bs.modal", openSetupModal);

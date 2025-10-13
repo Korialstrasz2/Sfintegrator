@@ -268,6 +268,10 @@ body.theme-sci-fi {
   background-color: var(--tree-connector-color);
 }
 
+.account-tree-branch--collapsed > .account-tree-node::after {
+  display: none;
+}
+
 .account-tree-branch--root > .account-tree-node::after {
   right: -2.25rem;
 }
@@ -304,6 +308,10 @@ body.theme-sci-fi {
   background-color: var(--tree-connector-color);
 }
 
+.account-tree-branch--collapsed > .account-tree-children {
+  display: none;
+}
+
 .account-tree-node {
   position: relative;
   min-width: 240px;
@@ -314,6 +322,10 @@ body.theme-sci-fi {
   padding: 1rem 1.25rem;
   box-shadow: 0 1.5rem 3rem rgba(15, 23, 42, 0.08);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.account-tree-node--collapsible {
+  cursor: pointer;
 }
 
 .account-tree-node:hover {
