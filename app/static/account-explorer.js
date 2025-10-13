@@ -156,8 +156,10 @@
     const accountRelated = document.getElementById("account-explorer-related");
     const accountEmpty = document.getElementById("account-explorer-account-empty");
     const treeViewContainer = document.getElementById("account-explorer-tree-view");
+    const treeToolbar = document.getElementById("account-explorer-tree-toolbar");
     const treeContent = document.getElementById("account-explorer-tree-content");
     const treeEmpty = document.getElementById("account-explorer-tree-empty");
+    const openTreeTabButton = document.getElementById("account-explorer-open-tree");
     const recordCountBadge = document.getElementById("account-explorer-record-count");
     const viewListButton = document.getElementById("account-explorer-view-list");
     const viewTreeButton = document.getElementById("account-explorer-view-tree");
@@ -181,6 +183,8 @@
     let explorerResult = null;
     let selectedAccountId = null;
     let availableOrgs = [];
+    let latestTreeAccount = null;
+    let latestTreeContext = null;
 
     let objectDefinitions = normalizeObjectDefinitions(window.ACCOUNT_EXPLORER_OBJECTS);
     let configState =
@@ -197,6 +201,11 @@
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
     const fieldCache = new Map();
+
+    if (treeContent) {
+      treeContent.addEventListener("click", handleTreeNodeClick);
+      treeContent.addEventListener("keydown", handleTreeNodeKeydown);
+    }
 
     function isObjectVisible(key) {
       const definition = objectDefinitions.find((item) => item.key === key);
@@ -378,6 +387,30 @@
       });
     }
 
+    function renderTreeFieldList(container, fields) {
+      container.innerHTML = "";
+      if (!Array.isArray(fields) || !fields.length) {
+        const empty = document.createElement("div");
+        empty.className = "account-tree-node__empty text-muted";
+        empty.textContent = translateKey("account_explorer.results.no_fields");
+        container.appendChild(empty);
+        return;
+      }
+      fields.forEach((field) => {
+        const row = document.createElement("div");
+        row.className = "account-tree-node__field";
+        const nameEl = document.createElement("div");
+        nameEl.className = "account-tree-node__field-name";
+        nameEl.textContent = field.name;
+        const valueEl = document.createElement("div");
+        valueEl.className = "account-tree-node__field-value";
+        valueEl.textContent = formatValue(field.value);
+        row.appendChild(nameEl);
+        row.appendChild(valueEl);
+        container.appendChild(row);
+      });
+    }
+
     function getAccountById(accountId) {
       if (
         !explorerResult ||
@@ -478,9 +511,128 @@
       return map;
     }
 
-    function buildContactPointTree(recordId, context, { forIndividual = false } = {}) {
-      if (!recordId) {
+    function getTreeNodeTypeClass(objectKey) {
+      switch (objectKey) {
+        case "Account":
+          return "account-tree-node--account";
+        case "Contact":
+          return "account-tree-node--contact";
+        case "Individual":
+          return "account-tree-node--individual";
+        case "ContactPointPhone":
+        case "ContactPointEmail":
+          return "account-tree-node--contact-point";
+        default:
+          return "account-tree-node--object";
+      }
+    }
+
+    function createTreeRecordNode(record, objectKey, { label, showFields = true } = {}) {
+      if (!record) {
         return null;
+      }
+      const node = document.createElement("div");
+      const classes = ["account-tree-node", getTreeNodeTypeClass(objectKey)];
+      node.className = classes.filter(Boolean).join(" ");
+      if (objectKey) {
+        node.dataset.objectKey = objectKey;
+      }
+      if (label) {
+        const badge = document.createElement("div");
+        badge.className = "account-tree-node__badge";
+        badge.textContent = label;
+        node.appendChild(badge);
+      }
+      const title = document.createElement("div");
+      title.className = "account-tree-node__title";
+      title.textContent = getRecordDisplayName(record, objectKey);
+      node.appendChild(title);
+      const recordId = getRecordId(record);
+      if (recordId) {
+        const meta = document.createElement("div");
+        meta.className = "account-tree-node__meta";
+        meta.textContent = recordId;
+        node.appendChild(meta);
+      }
+      if (showFields) {
+        const fieldsContainer = document.createElement("div");
+        fieldsContainer.className = "account-tree-node__fields";
+        renderTreeFieldList(fieldsContainer, record.fields || []);
+        node.appendChild(fieldsContainer);
+      }
+      return node;
+    }
+
+    function createTreeGroupNode(label, count, { objectKey, variant } = {}) {
+      const node = document.createElement("div");
+      const classes = ["account-tree-node", "account-tree-node--group"];
+      if (variant) {
+        classes.push(`account-tree-node--group-${variant}`);
+      }
+      node.className = classes.join(" ");
+      if (objectKey) {
+        node.dataset.objectKey = objectKey;
+      }
+      const title = document.createElement("div");
+      title.className = "account-tree-node__title";
+      title.textContent = `${label} (${count})`;
+      node.appendChild(title);
+      return node;
+    }
+
+    function createTreeEmptyNode(message) {
+      const node = document.createElement("div");
+      node.className = "account-tree-node account-tree-node--empty";
+      const text = document.createElement("div");
+      text.className = "account-tree-node__empty text-muted";
+      text.textContent = message;
+      node.appendChild(text);
+      return node;
+    }
+
+    function buildTreeBranch(node, children = [], { isRoot = false } = {}) {
+      if (!node) {
+        return null;
+      }
+      const branch = document.createElement("div");
+      branch.className = "account-tree-branch";
+      if (isRoot) {
+        branch.classList.add("account-tree-branch--root");
+      }
+      if (children.length) {
+        branch.classList.add("account-tree-branch--has-children");
+        branch.classList.add("account-tree-branch--collapsible");
+        branch.dataset.collapsed = "false";
+        node.classList.add("account-tree-node--collapsible");
+        node.setAttribute("aria-expanded", "true");
+        node.setAttribute("role", "button");
+        node.tabIndex = 0;
+      }
+      branch.appendChild(node);
+      if (children.length) {
+        const childrenContainer = document.createElement("div");
+        childrenContainer.className = "account-tree-children";
+        children.forEach((child) => {
+          if (child) {
+            childrenContainer.appendChild(child);
+          }
+        });
+        branch.appendChild(childrenContainer);
+      }
+      return branch;
+    }
+
+    function getRecordAncestryKey(record, objectKey) {
+      const id = getRecordId(record);
+      if (!id) {
+        return null;
+      }
+      return `${objectKey || "__unknown__"}:${id}`;
+    }
+
+    function buildContactPointBranches(recordId, context, { forIndividual = false } = {}) {
+      if (!recordId) {
+        return [];
       }
       const mapping = forIndividual
         ? [
@@ -491,9 +643,7 @@
             { key: "ContactPointPhone", records: context.contactPointPhonesByContact },
             { key: "ContactPointEmail", records: context.contactPointEmailsByContact },
           ];
-      const wrapper = document.createElement("div");
-      wrapper.className = "ms-3 ps-3 border-start mt-2";
-      let hasContent = false;
+      const branches = [];
       mapping.forEach((entry) => {
         if (!context.isObjectVisible(entry.key)) {
           return;
@@ -502,91 +652,280 @@
         if (!records.length) {
           return;
         }
-        hasContent = true;
-        const section = document.createElement("div");
-        section.className = "mb-3";
-        const heading = document.createElement("div");
-        heading.className = "fw-semibold small text-muted text-uppercase mb-2";
-        heading.textContent = `${context.getLabel(entry.key)} (${records.length})`;
-        section.appendChild(heading);
-        records.forEach((recordItem) => {
-          section.appendChild(createRecordCard(recordItem, entry.key));
+        const groupNode = createTreeGroupNode(context.getLabel(entry.key), records.length, {
+          objectKey: entry.key,
+          variant: "contact-point",
         });
-        wrapper.appendChild(section);
+        const recordBranches = records
+          .map((recordItem) => {
+            if (!recordItem) {
+              return null;
+            }
+            const recordNode = createTreeRecordNode(recordItem, entry.key, {
+              label: context.getLabel(entry.key),
+            });
+            return buildTreeBranch(recordNode);
+          })
+          .filter(Boolean);
+        branches.push(buildTreeBranch(groupNode, recordBranches));
       });
-      if (!hasContent) {
-        return null;
-      }
-      return wrapper;
+      return branches;
     }
 
-    function buildContactTree(record, context) {
+    function buildContactChildrenBranches(record, context, ancestry) {
       const contactId = getRecordId(record);
       if (!contactId) {
-        return null;
+        return [];
       }
-      const wrapper = document.createElement("div");
-      wrapper.className = "ms-3 ps-3 border-start mt-2";
-      let hasContent = false;
+      const children = [];
 
       if (context.isObjectVisible("AccountContactRelation")) {
         const relations = context.contactRelationsByContact.get(contactId) || [];
         if (relations.length) {
-          hasContent = true;
-          const section = document.createElement("div");
-          section.className = "mb-3";
-          const heading = document.createElement("div");
-          heading.className = "fw-semibold small text-muted text-uppercase mb-2";
-          heading.textContent = `${context.getLabel("AccountContactRelation")} (${relations.length})`;
-          section.appendChild(heading);
-          relations.forEach((relation) => {
-            section.appendChild(createRecordCard(relation, "AccountContactRelation"));
-          });
-          wrapper.appendChild(section);
+          const groupNode = createTreeGroupNode(
+            context.getLabel("AccountContactRelation"),
+            relations.length,
+            { objectKey: "AccountContactRelation", variant: "relation" }
+          );
+          const relationBranches = relations
+            .map((relation) => {
+              const relationNode = createTreeRecordNode(relation, "AccountContactRelation", {
+                label: context.getLabel("AccountContactRelation"),
+              });
+              return buildTreeBranch(relationNode);
+            })
+            .filter(Boolean);
+          children.push(buildTreeBranch(groupNode, relationBranches));
         }
       }
 
       if (context.isObjectVisible("Individual")) {
         const individualId = findFirstFieldValue(record, INDIVIDUAL_LINK_FIELDS);
-        const individualRecords = [];
         if (individualId && context.individualsById.has(String(individualId))) {
-          individualRecords.push(context.individualsById.get(String(individualId)));
-        }
-        if (individualRecords.length) {
-          hasContent = true;
-          const section = document.createElement("div");
-          section.className = "mb-3";
-          const heading = document.createElement("div");
-          heading.className = "fw-semibold small text-muted text-uppercase mb-2";
-          heading.textContent = `${context.getLabel("Individual")} (${individualRecords.length})`;
-          section.appendChild(heading);
-          individualRecords.forEach((individualRecord) => {
-            const card = createRecordCard(individualRecord, "Individual");
-            const individualIdValue = getRecordId(individualRecord);
-            const contactPoints = buildContactPointTree(individualIdValue, context, {
-              forIndividual: true,
-            });
-            if (contactPoints) {
-              card.appendChild(contactPoints);
-            }
-            section.appendChild(card);
+          const individualRecord = context.individualsById.get(String(individualId));
+          const individualNode = createTreeRecordNode(individualRecord, "Individual", {
+            label: context.getLabel("Individual"),
           });
-          wrapper.appendChild(section);
+          const contactPoints = buildContactPointBranches(
+            getRecordId(individualRecord),
+            context,
+            { forIndividual: true }
+          );
+          children.push(
+            buildTreeBranch(individualNode, [
+              ...contactPoints,
+              ...buildGenericRelatedBranches(individualRecord, context, ancestry),
+            ])
+          );
         }
       }
 
-      const contactPoints = buildContactPointTree(contactId, context, {
-        forIndividual: false,
-      });
-      if (contactPoints) {
-        hasContent = true;
-        wrapper.appendChild(contactPoints);
-      }
+      children.push(...buildContactPointBranches(contactId, context, { forIndividual: false }));
 
-      if (!hasContent) {
+      const genericChildren = buildGenericRelatedBranches(record, context, ancestry, {
+        excludeKeys: [
+          "AccountContactRelation",
+          "Individual",
+          "ContactPointPhone",
+          "ContactPointEmail",
+        ],
+      });
+      children.push(...genericChildren);
+
+      return children;
+    }
+
+    function buildGenericRelatedBranches(
+      record,
+      context,
+      ancestry = new Set(),
+      { excludeKeys = [] } = {}
+    ) {
+      if (!record || !record.related || typeof record.related !== "object") {
+        return [];
+      }
+      const excluded = new Set(excludeKeys);
+      const branches = [];
+      Object.keys(record.related)
+        .filter((key) => typeof key === "string" && key && !excluded.has(key))
+        .forEach((key) => {
+          if (!context.isObjectVisible(key)) {
+            return;
+          }
+          const records = Array.isArray(record.related[key]) ? record.related[key] : [];
+          if (!records.length) {
+            return;
+          }
+          const groupNode = createTreeGroupNode(context.getLabel(key), records.length, {
+            objectKey: key,
+          });
+          const recordBranches = records
+            .map((item) => buildRecordBranch(item, key, context, ancestry))
+            .filter(Boolean);
+          branches.push(buildTreeBranch(groupNode, recordBranches));
+        });
+      return branches;
+    }
+
+    function buildRecordBranch(record, objectKey, context, ancestry = new Set()) {
+      if (!record) {
         return null;
       }
-      return wrapper;
+      const recordNode = createTreeRecordNode(record, objectKey, {
+        label: context.getLabel(objectKey),
+      });
+      const ancestryKey = getRecordAncestryKey(record, objectKey);
+      const hasCycle = ancestryKey ? ancestry.has(ancestryKey) : false;
+      const nextAncestry = new Set(ancestry);
+      if (ancestryKey) {
+        nextAncestry.add(ancestryKey);
+      }
+      let children = [];
+      if (!hasCycle) {
+        if (objectKey === "Contact") {
+          children = buildContactChildrenBranches(record, context, nextAncestry);
+        }
+        const genericChildren = buildGenericRelatedBranches(record, context, nextAncestry);
+        if (genericChildren.length) {
+          children = children.concat(genericChildren);
+        }
+      }
+      return buildTreeBranch(recordNode, children);
+    }
+
+    function buildObjectBranch(key, label, related, context, ancestry = new Set()) {
+      if (!context.isObjectVisible(key)) {
+        return null;
+      }
+      const records = Array.isArray(related[key]) ? related[key] : [];
+      if (!records.length) {
+        return null;
+      }
+      const groupNode = createTreeGroupNode(label, records.length, {
+        objectKey: key,
+        variant: key === "Contact" ? "contact" : undefined,
+      });
+      const recordBranches = records
+        .map((recordItem) => buildRecordBranch(recordItem, key, context, ancestry))
+        .filter(Boolean);
+      if (!recordBranches.length) {
+        const emptyNode = createTreeEmptyNode(
+          translateKey("account_explorer.results.empty_object")
+        );
+        return buildTreeBranch(groupNode, [buildTreeBranch(emptyNode)]);
+      }
+      return buildTreeBranch(groupNode, recordBranches);
+    }
+
+    function createTreeHeader(account) {
+      if (!account) {
+        return null;
+      }
+      const header = document.createElement("div");
+      header.className = "account-tree-header mb-3";
+      const title = document.createElement("div");
+      title.className = "account-tree-header__title";
+      title.textContent = getAccountDisplayName(account) || account.id || "";
+      header.appendChild(title);
+      if (account.id) {
+        const meta = document.createElement("div");
+        meta.className = "account-tree-header__meta text-muted";
+        meta.textContent = account.id;
+        header.appendChild(meta);
+      }
+      return header;
+    }
+
+    function buildAccountTreeDiagram(account, context, { fullWidth = false } = {}) {
+      const diagram = document.createElement("div");
+      diagram.className = "account-tree-diagram";
+      if (fullWidth) {
+        diagram.classList.add("account-tree-diagram--full");
+      }
+      const accountNode = createTreeRecordNode(account, "Account", {
+        label: translateKey("account_explorer.results.account_label"),
+      });
+      const children = [];
+      const related = account.related || {};
+      const nestedKeys = new Set([
+        "AccountContactRelation",
+        "Individual",
+        "ContactPointPhone",
+        "ContactPointEmail",
+      ]);
+      const definitionOrder = context.visibleDefinitions.map((definition) => definition.key);
+      const relatedKeys = Object.keys(related || {}).filter((key) => !nestedKeys.has(key));
+      const orderedKeys = Array.from(new Set([...definitionOrder, ...relatedKeys]));
+      orderedKeys.forEach((key) => {
+        if (nestedKeys.has(key)) {
+          return;
+        }
+        const label = context.getLabel(key);
+        const branch = buildObjectBranch(key, label, related, context);
+        if (branch) {
+          children.push(branch);
+        }
+      });
+      if (!children.length) {
+        const emptyNode = createTreeEmptyNode(
+          translateKey("account_explorer.results.empty_object")
+        );
+        children.push(buildTreeBranch(emptyNode));
+      }
+      const rootBranch = buildTreeBranch(accountNode, children, { isRoot: true });
+      if (rootBranch) {
+        diagram.appendChild(rootBranch);
+      }
+      return diagram;
+    }
+
+    function toggleTreeBranch(node) {
+      if (!node) {
+        return;
+      }
+      const branch = node.closest(
+        ".account-tree-branch.account-tree-branch--has-children"
+      );
+      if (!branch) {
+        return;
+      }
+      const collapsed = !branch.classList.contains("account-tree-branch--collapsed");
+      branch.classList.toggle("account-tree-branch--collapsed", collapsed);
+      branch.dataset.collapsed = collapsed ? "true" : "false";
+      node.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+
+    function handleTreeNodeClick(event) {
+      if (!treeContent) {
+        return;
+      }
+      const node = event.target.closest(".account-tree-node--collapsible");
+      if (!node) {
+        return;
+      }
+      if (event.target.closest("a, button, input, textarea, select")) {
+        return;
+      }
+      toggleTreeBranch(node);
+    }
+
+    function handleTreeNodeKeydown(event) {
+      if (!treeContent) {
+        return;
+      }
+      const key = event.key;
+      if (key !== "Enter" && key !== " " && key !== "Spacebar" && key !== "Space") {
+        return;
+      }
+      const node = event.target.closest(".account-tree-node--collapsible");
+      if (!node) {
+        return;
+      }
+      if (event.target.closest("a, button, input, textarea, select")) {
+        return;
+      }
+      event.preventDefault();
+      toggleTreeBranch(node);
     }
 
     function renderTree(account) {
@@ -595,24 +934,34 @@
       }
       const isTreeMode = currentViewMode === "tree";
       treeViewContainer.classList.toggle("d-none", !isTreeMode);
+      if (treeToolbar) {
+        treeToolbar.classList.toggle("d-none", !isTreeMode || !account);
+      }
+      if (openTreeTabButton) {
+        openTreeTabButton.disabled = !isTreeMode || !account;
+      }
       if (!isTreeMode) {
         treeContent.classList.add("d-none");
         treeEmpty.classList.remove("d-none");
         treeEmpty.textContent = translateKey("account_explorer.results.select_account");
+        latestTreeAccount = null;
+        latestTreeContext = null;
         return;
       }
       if (!account) {
         treeContent.classList.add("d-none");
         treeEmpty.classList.remove("d-none");
         treeEmpty.textContent = translateKey("account_explorer.results.select_account");
+        latestTreeAccount = null;
+        latestTreeContext = null;
         return;
       }
+
       treeEmpty.classList.add("d-none");
       treeContent.classList.remove("d-none");
       treeContent.innerHTML = "";
 
       const related = account.related || {};
-      const contacts = Array.isArray(related.Contact) ? related.Contact : [];
       const relations = Array.isArray(related.AccountContactRelation)
         ? related.AccountContactRelation
         : [];
@@ -634,6 +983,11 @@
       const contactPointPhonesByIndividual = buildLinkMap(phones, INDIVIDUAL_LINK_FIELDS);
       const contactPointEmailsByIndividual = buildLinkMap(emails, INDIVIDUAL_LINK_FIELDS);
 
+      const visibleDefinitions = getVisibleObjects().map((definition) => ({
+        key: definition.key,
+        label: definition.label,
+      }));
+
       const context = {
         getLabel: getObjectLabel,
         isObjectVisible,
@@ -643,59 +997,124 @@
         contactPointEmailsByContact,
         contactPointPhonesByIndividual,
         contactPointEmailsByIndividual,
+        visibleDefinitions,
       };
 
+      const header = createTreeHeader(account);
+      if (header) {
+        treeContent.appendChild(header);
+      }
+
+      const diagram = buildAccountTreeDiagram(account, context);
+      treeContent.appendChild(diagram);
+      treeContent.scrollLeft = 0;
+
+      latestTreeAccount = account;
+      latestTreeContext = context;
+    }
+
+    function openTreeInNewTab() {
+      if (!latestTreeAccount || !latestTreeContext) {
+        return;
+      }
+      const treeWindow = window.open("", "_blank");
+      if (!treeWindow) {
+        return;
+      }
+      const account = latestTreeAccount;
+      const context = latestTreeContext;
+      const themeClass = document.body ? document.body.className : "";
       const container = document.createElement("div");
-      container.className = "mb-3";
+      container.className = "account-tree-full-container";
+      const header = createTreeHeader(account);
+      if (header) {
+        container.appendChild(header);
+      }
+      const diagram = buildAccountTreeDiagram(account, context, { fullWidth: true });
+      container.appendChild(diagram);
 
-      const accountTitle = document.createElement("div");
-      accountTitle.className = "fw-semibold";
-      accountTitle.textContent = getAccountDisplayName(account) || account.id || "";
-      container.appendChild(accountTitle);
-
-      const accountIdText = document.createElement("div");
-      accountIdText.className = "text-muted small mb-3";
-      accountIdText.textContent = account.id || "";
-      container.appendChild(accountIdText);
-
-      const wrapper = document.createElement("div");
-      wrapper.className = "ms-3 ps-3 border-start";
-      container.appendChild(wrapper);
-
-      const visibleObjects = getVisibleObjects();
-      visibleObjects.forEach((definition) => {
-        const key = definition.key;
-        const records = Array.isArray(related[key]) ? related[key] : [];
-        const section = document.createElement("div");
-        section.className = "mb-4";
-        const heading = document.createElement("div");
-        heading.className = "fw-semibold small text-muted text-uppercase mb-2";
-        heading.textContent = `${definition.label} (${records.length})`;
-        section.appendChild(heading);
-        if (!records.length) {
-          const empty = document.createElement("div");
-          empty.className = "text-muted small";
-          empty.textContent = translateKey("account_explorer.results.empty_object");
-          section.appendChild(empty);
-        } else {
-          records.forEach((recordItem) => {
-            if (!recordItem) {
-              return;
-            }
-            const card = createRecordCard(recordItem, key);
-            if (key === "Contact") {
-              const nested = buildContactTree(recordItem, context);
-              if (nested) {
-                card.appendChild(nested);
-              }
-            }
-            section.appendChild(card);
-          });
-        }
-        wrapper.appendChild(section);
+      const accountName = getAccountDisplayName(account) || account.id || "";
+      const titleText = translateKey("account_explorer.results.tree_tab_title", {
+        account: accountName,
       });
-
-      treeContent.appendChild(container);
+      const bootstrapLink = document.querySelector('link[href*="bootstrap"]');
+      const bootstrapHref =
+        (bootstrapLink && bootstrapLink.href) ||
+        "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css";
+      const bootstrapIntegrity = bootstrapLink ? bootstrapLink.integrity :
+        "sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH";
+      const bootstrapCrossorigin = bootstrapLink ? bootstrapLink.crossOrigin : "anonymous";
+      const stylesLink = document.querySelector('link[href*="styles.css"]');
+      const stylesHref = stylesLink ? stylesLink.href : `${window.location.origin}/static/styles.css`;
+      const htmlContent = container.outerHTML;
+      const language = document.documentElement.lang || "en";
+      let bootstrapAttributes = "";
+      if (bootstrapIntegrity) {
+        const crossoriginAttr = bootstrapCrossorigin
+          ? ` crossorigin="${bootstrapCrossorigin}"`
+          : "";
+        bootstrapAttributes = ` integrity="${bootstrapIntegrity}"${crossoriginAttr}`;
+      } else if (bootstrapCrossorigin) {
+        bootstrapAttributes = ` crossorigin="${bootstrapCrossorigin}"`;
+      }
+      treeWindow.document.open();
+      treeWindow.document.write(`<!doctype html>
+<html lang="${language}">
+  <head>
+    <meta charset="utf-8" />
+    <title>${titleText}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="${bootstrapHref}"${bootstrapAttributes} />
+    <link rel="stylesheet" href="${stylesHref}" />
+  </head>
+  <body class="${themeClass} account-tree-full-page">
+    <div class="account-tree-full-wrapper">
+      ${htmlContent}
+    </div>
+    <script>
+      (function () {
+        function toggleBranch(node) {
+          if (!node) {
+            return;
+          }
+          var branch = node.closest('.account-tree-branch.account-tree-branch--has-children');
+          if (!branch) {
+            return;
+          }
+          var collapsed = branch.classList.toggle('account-tree-branch--collapsed');
+          branch.dataset.collapsed = collapsed ? 'true' : 'false';
+          node.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        document.addEventListener('click', function (event) {
+          var node = event.target.closest('.account-tree-node--collapsible');
+          if (!node) {
+            return;
+          }
+          if (event.target.closest('a, button, input, textarea, select')) {
+            return;
+          }
+          toggleBranch(node);
+        });
+        document.addEventListener('keydown', function (event) {
+          var key = event.key;
+          if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar' && key !== 'Space') {
+            return;
+          }
+          var node = event.target.closest('.account-tree-node--collapsible');
+          if (!node) {
+            return;
+          }
+          if (event.target.closest('a, button, input, textarea, select')) {
+            return;
+          }
+          event.preventDefault();
+          toggleBranch(node);
+        });
+      })();
+    </script>
+  </body>
+</html>`);
+      treeWindow.document.close();
     }
 
     function updateListView(account) {
@@ -1341,6 +1760,12 @@
     }
     if (viewTreeButton) {
       viewTreeButton.addEventListener("click", () => setViewMode("tree"));
+    }
+
+    if (openTreeTabButton) {
+      openTreeTabButton.addEventListener("click", () => {
+        openTreeInNewTab();
+      });
     }
     if (setupButton && setupModalEl) {
       setupModalEl.addEventListener("show.bs.modal", openSetupModal);

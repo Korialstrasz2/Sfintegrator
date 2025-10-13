@@ -88,8 +88,21 @@
                 <div id="account-explorer-account-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
               </div>
               <div id="account-explorer-tree-view" class="d-none">
+                <div
+                  id="account-explorer-tree-toolbar"
+                  class="d-flex justify-content-end mb-3 d-none"
+                >
+                  <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    id="account-explorer-open-tree"
+                    disabled
+                  >
+                    {{ t('account_explorer.results.open_wide_tree') }}
+                  </button>
+                </div>
                 <div id="account-explorer-tree-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
-                <div id="account-explorer-tree-content" class="d-none"></div>
+                <div id="account-explorer-tree-content" class="d-none account-tree-scroll"></div>
               </div>
             </div>
           </div>
