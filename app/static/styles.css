@@ -196,6 +196,338 @@ body.theme-sci-fi {
   border-color: rgba(59, 130, 246, 0.35);
 }
 
+.account-tree-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 1rem;
+}
+
+.account-tree-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.account-tree-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+}
+
+.account-tree-scroll::-webkit-scrollbar-track {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.account-tree-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.account-tree-header__title {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.account-tree-header__meta {
+  font-size: 0.875rem;
+}
+
+.account-tree-diagram {
+  --tree-connector-color: rgba(148, 163, 184, 0.45);
+  width: max-content;
+  display: inline-block;
+  position: relative;
+  padding: 0.5rem 0;
+}
+
+.account-tree-diagram--full {
+  padding: 1rem 0;
+}
+
+.theme-dark .account-tree-diagram,
+.theme-sci-fi .account-tree-diagram {
+  --tree-connector-color: rgba(148, 163, 184, 0.35);
+}
+
+.account-tree-branch {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 2.5rem;
+}
+
+.account-tree-branch + .account-tree-branch {
+  margin-top: 1.75rem;
+}
+
+.account-tree-branch--has-children > .account-tree-node::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -2rem;
+  width: 2rem;
+  height: 1px;
+  background-color: var(--tree-connector-color);
+}
+
+.account-tree-branch--root > .account-tree-node::after {
+  right: -2.25rem;
+}
+
+.account-tree-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  position: relative;
+  padding-left: 2rem;
+  margin-left: 0.5rem;
+}
+
+.account-tree-children::before {
+  content: "";
+  position: absolute;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  left: 0;
+  border-left: 1px solid var(--tree-connector-color);
+}
+
+.account-tree-children > .account-tree-branch {
+  position: relative;
+}
+
+.account-tree-children > .account-tree-branch::before {
+  content: "";
+  position: absolute;
+  left: -2rem;
+  top: 50%;
+  width: 2rem;
+  height: 1px;
+  background-color: var(--tree-connector-color);
+}
+
+.account-tree-node {
+  position: relative;
+  min-width: 240px;
+  max-width: 320px;
+  background-color: var(--bs-body-bg, #ffffff);
+  border: 1px solid var(--tree-connector-color);
+  border-radius: 1rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1.5rem 3rem rgba(15, 23, 42, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.account-tree-node:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 2rem 3.5rem rgba(15, 23, 42, 0.12);
+}
+
+.theme-dark .account-tree-node,
+.theme-sci-fi .account-tree-node {
+  background-color: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 1.5rem 3.5rem rgba(15, 23, 42, 0.6);
+}
+
+.account-tree-node__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(15, 23, 42, 0.6);
+  background: rgba(15, 23, 42, 0.08);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  margin-bottom: 0.75rem;
+}
+
+.theme-dark .account-tree-node__badge,
+.theme-sci-fi .account-tree-node__badge {
+  color: rgba(226, 232, 240, 0.75);
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.account-tree-node__title {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.4;
+  margin-bottom: 0.4rem;
+}
+
+.account-tree-node__meta {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.55);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.theme-dark .account-tree-node__meta,
+.theme-sci-fi .account-tree-node__meta {
+  color: rgba(226, 232, 240, 0.55);
+}
+
+.account-tree-node__fields {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.account-tree-node__field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+
+.account-tree-node__field-name {
+  flex: 0 0 40%;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.7);
+}
+
+.account-tree-node__field-value {
+  flex: 1 1 0;
+  color: rgba(15, 23, 42, 0.85);
+  word-break: break-word;
+}
+
+.theme-dark .account-tree-node__field-name,
+.theme-dark .account-tree-node__field-value,
+.theme-sci-fi .account-tree-node__field-name,
+.theme-sci-fi .account-tree-node__field-value {
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.account-tree-node__empty {
+  font-size: 0.85rem;
+}
+
+.account-tree-node--account {
+  border: 2px solid rgba(13, 110, 253, 0.45);
+  background: linear-gradient(135deg, rgba(13, 110, 253, 0.12), transparent 55%);
+}
+
+.account-tree-node--contact {
+  border-left: 4px solid rgba(13, 110, 253, 0.75);
+  background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), transparent 65%);
+}
+
+.account-tree-node--individual {
+  border-left: 4px solid rgba(111, 66, 193, 0.7);
+  background: linear-gradient(135deg, rgba(111, 66, 193, 0.12), transparent 60%);
+}
+
+.account-tree-node--contact-point {
+  border-left: 4px solid rgba(255, 159, 67, 0.75);
+  background: linear-gradient(135deg, rgba(255, 159, 67, 0.12), transparent 60%);
+}
+
+.account-tree-node--object {
+  border-left: 4px solid rgba(59, 130, 246, 0.3);
+}
+
+.account-tree-node--group {
+  border-style: dashed;
+  border-color: rgba(148, 163, 184, 0.45);
+  background-color: rgba(148, 163, 184, 0.08);
+  box-shadow: none;
+}
+
+.account-tree-node--group-contact {
+  border-color: rgba(13, 110, 253, 0.45);
+  background-color: rgba(13, 110, 253, 0.08);
+}
+
+.account-tree-node--group-relation {
+  border-color: rgba(32, 201, 151, 0.45);
+  background-color: rgba(32, 201, 151, 0.08);
+}
+
+.account-tree-node--group-contact-point {
+  border-color: rgba(255, 159, 67, 0.45);
+  background-color: rgba(255, 159, 67, 0.1);
+}
+
+.account-tree-node--empty {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+}
+
+.theme-dark .account-tree-node--group,
+.theme-sci-fi .account-tree-node--group {
+  background-color: rgba(148, 163, 184, 0.16);
+}
+
+.theme-dark .account-tree-node--group-contact,
+.theme-sci-fi .account-tree-node--group-contact {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+.theme-dark .account-tree-node--group-relation,
+.theme-sci-fi .account-tree-node--group-relation {
+  background-color: rgba(16, 185, 129, 0.22);
+}
+
+.theme-dark .account-tree-node--group-contact-point,
+.theme-sci-fi .account-tree-node--group-contact-point {
+  background-color: rgba(255, 159, 67, 0.25);
+}
+
+.account-tree-full-page {
+  margin: 0;
+  padding: 2rem 1.5rem 3rem;
+  min-height: 100vh;
+}
+
+.account-tree-full-wrapper {
+  max-width: 100%;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.account-tree-full-container {
+  max-width: 100%;
+  padding: 1rem;
+}
+
+.account-tree-full-container .account-tree-header {
+  margin-bottom: 2rem;
+}
+
+.account-tree-full-container .account-tree-diagram {
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 992px) {
+  .account-tree-node {
+    min-width: 200px;
+    padding: 0.85rem 1rem;
+  }
+
+  .account-tree-branch {
+    gap: 2rem;
+  }
+
+  .account-tree-branch--has-children > .account-tree-node::after {
+    right: -1.75rem;
+    width: 1.75rem;
+  }
+
+  .account-tree-children {
+    padding-left: 1.75rem;
+  }
+
+  .account-tree-children > .account-tree-branch::before {
+    left: -1.75rem;
+    width: 1.75rem;
+  }
+}
+
 .query-layout {
   position: relative;
 }
