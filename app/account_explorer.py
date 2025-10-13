@@ -35,6 +35,13 @@ CONNECTED_OBJECTS: List[Dict[str, str]] = [
     {"key": "Sale__c", "label": "Sale"},
 ]
 
+_CONNECTED_OBJECT_LOOKUP: Dict[str, Dict[str, str]] = {
+    definition["key"]: definition for definition in CONNECTED_OBJECTS
+}
+
+_VALID_VIEW_MODES: Set[str] = {"list", "tree"}
+_DEFAULT_VIEW_MODE = "list"
+
 # Definition of the query requirements for each object.
 _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "Account": {
@@ -120,6 +127,8 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 @dataclass
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
+    objects: List[Dict[str, object]] = field(default_factory=list)
+    view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
     def get_fields(self, object_key: str) -> List[str]:
@@ -136,7 +145,37 @@ class ExplorerConfig:
         return sanitized
 
     def to_dict(self) -> Dict[str, object]:
-        return {"fields": {key: list(value) for key, value in self.fields.items()}, "updatedAt": self.updated_at}
+        return {
+            "fields": {key: list(value) for key, value in self.fields.items()},
+            "objects": [
+                {"key": str(item.get("key")), "hidden": bool(item.get("hidden"))}
+                for item in self.objects
+                if isinstance(item, dict) and item.get("key")
+            ],
+            "viewMode": self.view_mode,
+            "updatedAt": self.updated_at,
+        }
+
+    def get_objects(self) -> List[Dict[str, object]]:
+        seen: Set[str] = set()
+        configured: List[Dict[str, object]] = []
+        for item in self.objects:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if not isinstance(key, str) or not key or key in seen:
+                continue
+            base = _CONNECTED_OBJECT_LOOKUP.get(key)
+            if not base:
+                continue
+            configured.append({**base, "hidden": bool(item.get("hidden"))})
+            seen.add(key)
+        for definition in CONNECTED_OBJECTS:
+            key = definition["key"]
+            if key in seen:
+                continue
+            configured.append({**definition, "hidden": False})
+        return configured
 
 
 @dataclass
@@ -263,12 +302,12 @@ def get_session() -> ExplorerSession:
 
 def get_config() -> ExplorerConfig:
     if not CONFIG_FILE.exists():
-        return ExplorerConfig(fields={}, updated_at=None)
+        return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
     with _config_lock:
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return ExplorerConfig(fields={}, updated_at=None)
+            return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
         fields = data.get("fields") if isinstance(data, dict) else {}
         if not isinstance(fields, dict):
             fields = {}
@@ -287,13 +326,38 @@ def get_config() -> ExplorerConfig:
                     sanitized.append(name)
             if sanitized:
                 result[key] = sanitized[:MAX_FIELDS_PER_OBJECT]
+        objects_payload = data.get("objects") if isinstance(data, dict) else []
+        objects: List[Dict[str, object]] = []
+        if isinstance(objects_payload, list):
+            for item in objects_payload:
+                if not isinstance(item, dict):
+                    continue
+                key = item.get("key")
+                if not isinstance(key, str) or not key:
+                    continue
+                objects.append({"key": key, "hidden": bool(item.get("hidden"))})
+        view_mode_raw = data.get("viewMode") if isinstance(data, dict) else None
+        view_mode = view_mode_raw if isinstance(view_mode_raw, str) else _DEFAULT_VIEW_MODE
+        if view_mode not in _VALID_VIEW_MODES:
+            view_mode = _DEFAULT_VIEW_MODE
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
-        return ExplorerConfig(fields=result, updated_at=updated_at)
+        return ExplorerConfig(
+            fields=result,
+            objects=objects,
+            view_mode=view_mode,
+            updated_at=updated_at,
+        )
 
 
 def save_config(config: ExplorerConfig) -> None:
     payload = {
         "fields": {key: list(values) for key, values in config.fields.items()},
+        "objects": [
+            {"key": item["key"], "hidden": bool(item.get("hidden"))}
+            for item in config.objects
+            if isinstance(item, dict) and item.get("key")
+        ],
+        "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
     }
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -301,26 +365,64 @@ def save_config(config: ExplorerConfig) -> None:
         CONFIG_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def update_config(fields_payload: Dict[str, Sequence[str]]) -> ExplorerConfig:
-    sanitized: Dict[str, List[str]] = {}
+def update_config(payload: Dict[str, object]) -> ExplorerConfig:
+    if not isinstance(payload, dict):
+        payload = {}
+    existing = get_config()
+    sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
+    sanitized_objects: List[Dict[str, object]] = list(existing.objects)
+    view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
+
+    fields_payload = payload.get("fields") if "fields" in payload else None
+    if isinstance(fields_payload, dict):
+        sanitized_fields = {}
+        for key, values in fields_payload.items():
+            if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+                continue
+            cleaned: List[str] = []
+            for value in values:
+                if not isinstance(value, str):
+                    continue
+                name = value.strip()
+                if not name or name.lower() == "id":
+                    continue
+                if name not in cleaned:
+                    cleaned.append(name)
+                if len(cleaned) >= MAX_FIELDS_PER_OBJECT:
+                    break
+            if cleaned:
+                sanitized_fields[key] = cleaned
+
+    objects_payload = payload.get("objects") if "objects" in payload else None
+    if isinstance(objects_payload, Sequence) and not isinstance(objects_payload, (str, bytes)):
+        objects: List[Dict[str, object]] = []
+        seen: Set[str] = set()
+        for item in objects_payload:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if not isinstance(key, str) or not key or key in seen:
+                continue
+            if key not in _CONNECTED_OBJECT_LOOKUP:
+                continue
+            objects.append({"key": key, "hidden": bool(item.get("hidden"))})
+            seen.add(key)
+        sanitized_objects = objects
+
+    if "viewMode" in payload:
+        raw_view_mode = payload.get("viewMode")
+        if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
+            view_mode = raw_view_mode
+        else:
+            view_mode = _DEFAULT_VIEW_MODE
+
     timestamp = datetime.now(timezone.utc).isoformat()
-    for key, values in fields_payload.items():
-        if not isinstance(values, Sequence):
-            continue
-        cleaned: List[str] = []
-        for value in values:
-            if not isinstance(value, str):
-                continue
-            name = value.strip()
-            if not name or name.lower() == "id":
-                continue
-            if name not in cleaned:
-                cleaned.append(name)
-            if len(cleaned) >= MAX_FIELDS_PER_OBJECT:
-                break
-        if cleaned:
-            sanitized[key] = cleaned
-    config = ExplorerConfig(fields=sanitized, updated_at=timestamp)
+    config = ExplorerConfig(
+        fields=sanitized_fields,
+        objects=sanitized_objects,
+        view_mode=view_mode,
+        updated_at=timestamp,
+    )
     save_config(config)
     return config
 
@@ -656,9 +758,11 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     individual_by_account = _aggregate_individuals_by_account(contacts, individual_records)
 
     generated_at = datetime.now(timezone.utc).isoformat()
+    configured_objects = config.get_objects()
+
     explorer_data: Dict[str, object] = {
         "accounts": [],
-        "objects": CONNECTED_OBJECTS,
+        "objects": configured_objects,
         "config": {key: config.get_fields(key) for key in _OBJECT_DEFINITIONS.keys()},
         "summary": {},
     }
@@ -666,7 +770,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         explorer_data["warnings"] = dict(warnings)
 
     summary_counts: Dict[str, int] = {}
-    for obj in CONNECTED_OBJECTS:
+    for obj in configured_objects:
         summary_counts[obj["key"]] = len(results.get(obj["key"], []))
     explorer_data["summary"] = summary_counts
 
@@ -677,7 +781,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
             "fields": _record_to_field_list(account_display_fields, account_record or {}),
             "related": {},
         }
-        for obj in CONNECTED_OBJECTS:
+        for obj in configured_objects:
             key = obj["key"]
             definition = _OBJECT_DEFINITIONS.get(key, {})
             _, display_fields = _build_query_fields(org, key, config)

@@ -140,7 +140,7 @@ def account_explorer_page() -> str:
     page_title = translate("account_explorer.title", language)
     return render_template(
         "account_explorer.html",
-        account_explorer_objects=account_explorer.CONNECTED_OBJECTS,
+        account_explorer_objects=config.get_objects(),
         account_explorer_config=config.to_dict(),
         account_explorer_result=result,
         account_explorer_limit=account_explorer.MAX_ACCOUNT_IDS,
@@ -174,13 +174,9 @@ def settings() -> str:
         return redirect(url_for("main.settings", saved=1))
 
     saved = request.args.get("saved") == "1"
-    config = account_explorer.get_config()
     return render_template(
         "settings.html",
         settings_saved=saved,
-        account_explorer_objects=account_explorer.list_objects(),
-        account_explorer_config=config.to_dict(),
-        account_explorer_limit=account_explorer.MAX_ACCOUNT_IDS,
     )
 
 
@@ -282,7 +278,7 @@ def api_account_explorer_get_config() -> Response:
         "config": config.to_dict(),
         "resolved": resolved,
         "objects": objects,
-        "connectedObjects": account_explorer.CONNECTED_OBJECTS,
+        "connectedObjects": config.get_objects(),
         "limit": account_explorer.MAX_ACCOUNT_IDS,
     }
     return jsonify(payload)
@@ -291,16 +287,16 @@ def api_account_explorer_get_config() -> Response:
 @main_bp.route("/api/account-explorer/config", methods=["POST"])
 def api_account_explorer_update_config() -> Response:
     payload = request.get_json(force=True)
-    fields = payload.get("fields") if isinstance(payload, dict) else None
-    if not isinstance(fields, dict):
-        return jsonify({"error": "invalid_fields"}), 400
-    config = account_explorer.update_config(fields)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_payload"}), 400
+    config = account_explorer.update_config(payload)
     objects = account_explorer.list_objects()
     resolved = {definition["key"]: config.get_fields(definition["key"]) for definition in objects}
     return jsonify({
         "config": config.to_dict(),
         "resolved": resolved,
         "objects": objects,
+        "connectedObjects": config.get_objects(),
         "limit": account_explorer.MAX_ACCOUNT_IDS,
     })
 

@@ -50,9 +50,24 @@
   <div class="col-xl-8">
     <div class="card shadow-sm" id="account-explorer-results-card">
       <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
           <h5 class="card-title mb-0">{{ t('account_explorer.results.title') }}</h5>
-          <span class="badge bg-secondary" id="account-explorer-record-count" hidden></span>
+          <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+            <span class="badge bg-secondary" id="account-explorer-record-count" hidden></span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="{{ t('account_explorer.results.view.label') }}">
+              <button class="btn btn-outline-primary active" type="button" id="account-explorer-view-list">{{ t('account_explorer.results.view.list') }}</button>
+              <button class="btn btn-outline-primary" type="button" id="account-explorer-view-tree">{{ t('account_explorer.results.view.tree') }}</button>
+            </div>
+            <button
+              class="btn btn-outline-secondary btn-sm"
+              type="button"
+              id="account-explorer-setup-button"
+              data-bs-toggle="modal"
+              data-bs-target="#accountExplorerSetupModal"
+            >
+              {{ t('account_explorer.setup.button') }}
+            </button>
+          </div>
         </div>
         <p class="text-muted" id="account-explorer-results-placeholder">{{ t('account_explorer.results.placeholder') }}</p>
         <div id="account-explorer-results" class="d-none">
@@ -61,18 +76,107 @@
               <div class="list-group" id="account-explorer-account-list"></div>
             </div>
             <div class="col-lg-8">
-              <div id="account-explorer-account-details" class="d-none">
-                <h6 class="fw-semibold" id="account-explorer-account-heading"></h6>
-                <div class="mb-3">
-                  <h6 class="text-muted text-uppercase small">{{ t('account_explorer.results.fields_heading') }}</h6>
-                  <dl class="row" id="account-explorer-account-fields"></dl>
+              <div id="account-explorer-list-view">
+                <div id="account-explorer-account-details" class="d-none">
+                  <h6 class="fw-semibold" id="account-explorer-account-heading"></h6>
+                  <div class="mb-3">
+                    <h6 class="text-muted text-uppercase small">{{ t('account_explorer.results.fields_heading') }}</h6>
+                    <dl class="row" id="account-explorer-account-fields"></dl>
+                  </div>
+                  <div id="account-explorer-related"></div>
                 </div>
-                <div id="account-explorer-related"></div>
+                <div id="account-explorer-account-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
               </div>
-              <div id="account-explorer-account-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
+              <div id="account-explorer-tree-view" class="d-none">
+                <div id="account-explorer-tree-empty" class="text-muted">{{ t('account_explorer.results.select_account') }}</div>
+                <div id="account-explorer-tree-content" class="d-none"></div>
+              </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal fade"
+  id="accountExplorerSetupModal"
+  tabindex="-1"
+  aria-labelledby="accountExplorerSetupLabel"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="accountExplorerSetupLabel">{{ t('account_explorer.setup.title') }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ t('account_explorer.setup.close') }}"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">{{ t('account_explorer.setup.description') }}</p>
+        <div class="row g-4">
+          <div class="col-lg-4">
+            <h6 class="fw-semibold">{{ t('account_explorer.setup.objects_title') }}</h6>
+            <p class="text-muted small">{{ t('account_explorer.setup.objects_help') }}</p>
+            <ul class="list-group" id="account-explorer-setup-object-list"></ul>
+          </div>
+          <div class="col-lg-8">
+            <div class="mb-3">
+              <label class="form-label" for="account-explorer-setup-org">{{ t('account_explorer.setup.org_label') }}</label>
+              <select class="form-select" id="account-explorer-setup-org">
+                <option value="">{{ t('account_explorer.setup.org_placeholder') }}</option>
+              </select>
+              <div class="form-text">{{ t('account_explorer.setup.org_help') }}</div>
+            </div>
+            <div>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-semibold mb-0">{{ t('account_explorer.setup.fields_title') }}</h6>
+                <small class="text-muted">{{ t('account_explorer.setup.fields_help') }}</small>
+              </div>
+              <div class="accordion" id="account-explorer-setup-fields"></div>
+            </div>
+          </div>
+        </div>
+        <hr class="my-4" />
+        <div>
+          <h6 class="fw-semibold">{{ t('account_explorer.setup.view_title') }}</h6>
+          <p class="text-muted small">{{ t('account_explorer.setup.view_help') }}</p>
+          <div class="d-flex gap-3 flex-wrap">
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="account-explorer-setup-view"
+                id="account-explorer-setup-view-list"
+                value="list"
+              />
+              <label class="form-check-label" for="account-explorer-setup-view-list">
+                {{ t('account_explorer.setup.view_options.list') }}
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="account-explorer-setup-view"
+                id="account-explorer-setup-view-tree"
+                value="tree"
+              />
+              <label class="form-check-label" for="account-explorer-setup-view-tree">
+                {{ t('account_explorer.setup.view_options.tree') }}
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="me-auto small text-muted" id="account-explorer-setup-status"></div>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+          {{ t('account_explorer.setup.close') }}
+        </button>
+        <button type="button" class="btn btn-primary" id="account-explorer-setup-save">
+          {{ t('account_explorer.setup.save_button') }}
+        </button>
       </div>
     </div>
   </div>
