@@ -363,14 +363,17 @@
 
     function renderFieldList(container, fields) {
       container.innerHTML = "";
-      if (!Array.isArray(fields) || !fields.length) {
+      const visibleFields = Array.isArray(fields)
+        ? fields.filter((field) => field && !field.hidden)
+        : [];
+      if (!visibleFields.length) {
         const empty = document.createElement("div");
         empty.className = "text-muted small";
         empty.textContent = translateKey("account_explorer.results.no_fields");
         container.appendChild(empty);
         return;
       }
-      fields.forEach((field) => {
+      visibleFields.forEach((field) => {
         const dt = document.createElement("dt");
         dt.className = "col-sm-4 col-lg-3 mb-1";
         dt.textContent = field.name;
@@ -384,14 +387,17 @@
 
     function renderTreeFieldList(container, fields) {
       container.innerHTML = "";
-      if (!Array.isArray(fields) || !fields.length) {
+      const visibleFields = Array.isArray(fields)
+        ? fields.filter((field) => field && !field.hidden)
+        : [];
+      if (!visibleFields.length) {
         const empty = document.createElement("div");
         empty.className = "account-tree-node__empty text-muted";
         empty.textContent = translateKey("account_explorer.results.no_fields");
         container.appendChild(empty);
         return;
       }
-      fields.forEach((field) => {
+      visibleFields.forEach((field) => {
         const row = document.createElement("div");
         row.className = "account-tree-node__field";
         const nameEl = document.createElement("div");
