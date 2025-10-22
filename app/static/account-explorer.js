@@ -34,6 +34,58 @@
 
   const ALERT_OPERATOR_LOOKUP = new Map(ALERT_OPERATORS.map((operator) => [operator.value, operator]));
 
+  const ADVANCED_ALERT_MODES = {
+    SIMPLE: "simple",
+    ADVANCED: "advanced",
+  };
+
+  const ADVANCED_GROUP_OPTIONS = [
+    {
+      value: "and",
+      labelKey: "account_explorer.setup.alerts.advanced.group_logic_all",
+    },
+    {
+      value: "or",
+      labelKey: "account_explorer.setup.alerts.advanced.group_logic_any",
+    },
+  ];
+
+  const ADVANCED_SCOPE_MATCHES = [
+    {
+      value: "any",
+      labelKey: "account_explorer.setup.alerts.advanced.scope_match_any",
+    },
+    {
+      value: "all",
+      labelKey: "account_explorer.setup.alerts.advanced.scope_match_all",
+    },
+    {
+      value: "not_all",
+      labelKey: "account_explorer.setup.alerts.advanced.scope_match_not_all",
+    },
+    {
+      value: "none",
+      labelKey: "account_explorer.setup.alerts.advanced.scope_match_none",
+    },
+  ];
+
+  const ADVANCED_AGGREGATE_OPERATIONS = [
+    {
+      value: "duplicates",
+      labelKey: "account_explorer.setup.alerts.advanced.aggregate_duplicates",
+    },
+  ];
+
+  const ADVANCED_GROUP_LOOKUP = new Map(
+    ADVANCED_GROUP_OPTIONS.map((option) => [option.value, option])
+  );
+  const ADVANCED_SCOPE_MATCH_LOOKUP = new Map(
+    ADVANCED_SCOPE_MATCHES.map((option) => [option.value, option])
+  );
+  const ADVANCED_AGGREGATE_LOOKUP = new Map(
+    ADVANCED_AGGREGATE_OPERATIONS.map((option) => [option.value, option])
+  );
+
   function translateKey(key, params = {}) {
     if (typeof translate === "function") {
       const normalizedKey =
@@ -219,6 +271,27 @@
     return Boolean(definition.needsValue);
   }
 
+  function normalizeAdvancedGroupLogic(value) {
+    if (ADVANCED_GROUP_LOOKUP.has(value)) {
+      return value;
+    }
+    return ADVANCED_GROUP_OPTIONS[0]?.value || "and";
+  }
+
+  function normalizeAdvancedScopeMatch(value) {
+    if (ADVANCED_SCOPE_MATCH_LOOKUP.has(value)) {
+      return value;
+    }
+    return ADVANCED_SCOPE_MATCHES[0]?.value || "any";
+  }
+
+  function normalizeAdvancedAggregateOperation(value) {
+    if (ADVANCED_AGGREGATE_LOOKUP.has(value)) {
+      return value;
+    }
+    return ADVANCED_AGGREGATE_OPERATIONS[0]?.value || "duplicates";
+  }
+
   function createAlertFilter(existing) {
     const filter = existing || {};
     return {
@@ -235,6 +308,307 @@
     };
   }
 
+  function createAdvancedGroup(existing) {
+    const group = existing || {};
+    const children = Array.isArray(group.children)
+      ? group.children
+          .map((child) => cloneAdvancedNode(child))
+          .filter((child) => Boolean(child))
+      : [];
+    return {
+      id:
+        typeof group.id === "string" && group.id
+          ? group.id
+          : generateAlertId("adv-group"),
+      type: "group",
+      logic: normalizeAdvancedGroupLogic(group.logic),
+      children,
+    };
+  }
+
+  function createAdvancedCondition(existing, { objectKey } = {}) {
+    const condition = existing || {};
+    const operator = normalizeOperator(condition.operator);
+    const requiresValue = operatorRequiresValue(operator);
+    const value = typeof condition.value === "string" ? condition.value : "";
+    return {
+      id:
+        typeof condition.id === "string" && condition.id
+          ? condition.id
+          : generateAlertId("adv-condition"),
+      type: "condition",
+      object:
+        typeof condition.object === "string" && condition.object
+          ? condition.object
+          : typeof objectKey === "string"
+          ? objectKey
+          : "",
+      field: typeof condition.field === "string" ? condition.field : "",
+      operator,
+      value: requiresValue ? value : "",
+    };
+  }
+
+  function createAdvancedScope(existing) {
+    const scope = existing || {};
+    const children = Array.isArray(scope.children)
+      ? scope.children
+          .map((child) => cloneAdvancedNode(child))
+          .filter((child) => Boolean(child) && child.type !== "scope")
+      : [];
+    return {
+      id:
+        typeof scope.id === "string" && scope.id
+          ? scope.id
+          : generateAlertId("adv-scope"),
+      type: "scope",
+      object: typeof scope.object === "string" ? scope.object : "",
+      match: normalizeAdvancedScopeMatch(scope.match),
+      children,
+    };
+  }
+
+  function createAdvancedAggregate(existing) {
+    const aggregate = existing || {};
+    const minCountRaw = parseInt(aggregate.minCount, 10);
+    const minCount = Number.isNaN(minCountRaw) ? 2 : Math.max(2, minCountRaw);
+    const criteriaNode =
+      aggregate.criteria && typeof aggregate.criteria === "object"
+        ? cloneAdvancedNode(aggregate.criteria)
+        : null;
+    return {
+      id:
+        typeof aggregate.id === "string" && aggregate.id
+          ? aggregate.id
+          : generateAlertId("adv-aggregate"),
+      type: "aggregate",
+      object: typeof aggregate.object === "string" ? aggregate.object : "",
+      operation: normalizeAdvancedAggregateOperation(aggregate.operation),
+      field: typeof aggregate.field === "string" ? aggregate.field : "",
+      minCount,
+      distinctField:
+        typeof aggregate.distinctField === "string" ? aggregate.distinctField : "",
+      criteria: criteriaNode,
+    };
+  }
+
+  function cloneAdvancedNode(node, options = {}) {
+    if (!node || typeof node !== "object") {
+      return null;
+    }
+    if (node.type === "group") {
+      return createAdvancedGroup(node);
+    }
+    if (node.type === "condition") {
+      return createAdvancedCondition(node, options);
+    }
+    if (node.type === "scope") {
+      return createAdvancedScope(node);
+    }
+    if (node.type === "aggregate") {
+      return createAdvancedAggregate(node);
+    }
+    return null;
+  }
+
+  function createDefaultAdvancedRoot() {
+    return createAdvancedGroup({ logic: ADVANCED_GROUP_OPTIONS[0]?.value, children: [] });
+  }
+
+  function ensureAdvancedRoot(alert) {
+    if (!alert || typeof alert !== "object") {
+      return null;
+    }
+    if (!alert.advanced || typeof alert.advanced !== "object") {
+      alert.advanced = createDefaultAdvancedRoot();
+    }
+    if (!alert.advanced.id) {
+      alert.advanced.id = generateAlertId("adv-group");
+    }
+    if (!Array.isArray(alert.advanced.children)) {
+      alert.advanced.children = [];
+    }
+    return alert.advanced;
+  }
+
+  function visitAdvancedNodes(node, callback, parent = null, meta = null) {
+    if (!node || typeof node !== "object") {
+      return false;
+    }
+    if (callback(node, parent, meta) === true) {
+      return true;
+    }
+    if (node.type === "group" || node.type === "scope") {
+      const children = Array.isArray(node.children) ? node.children : [];
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index];
+        if (
+          visitAdvancedNodes(child, callback, node, { key: "children", index }) === true
+        ) {
+          return true;
+        }
+      }
+    }
+    if (node.type === "aggregate" && node.criteria) {
+      if (
+        visitAdvancedNodes(node.criteria, callback, node, {
+          key: "criteria",
+          index: 0,
+        }) === true
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function findAdvancedNodeById(alert, nodeId) {
+    if (!alert || !nodeId) {
+      return null;
+    }
+    const root = ensureAdvancedRoot(alert);
+    if (!root) {
+      return null;
+    }
+    if (root.id === nodeId) {
+      return { node: root, parent: null, meta: null };
+    }
+    let result = null;
+    visitAdvancedNodes(root, (node, parent, meta) => {
+      if (node && node.id === nodeId) {
+        result = { node, parent, meta };
+        return true;
+      }
+      return false;
+    });
+    return result;
+  }
+
+  function addAdvancedScope(alert, parentId) {
+    const root = ensureAdvancedRoot(alert);
+    if (!root) {
+      return null;
+    }
+    let parentNode = root;
+    if (parentId && parentId !== root.id) {
+      const found = findAdvancedNodeById(alert, parentId);
+      if (!found || !found.node || found.node.type !== "group") {
+        return null;
+      }
+      parentNode = found.node;
+    }
+    if (!Array.isArray(parentNode.children)) {
+      parentNode.children = [];
+    }
+    const scope = createAdvancedScope({});
+    parentNode.children.push(scope);
+    return scope;
+  }
+
+  function addAdvancedCondition(alert, parentId, { objectKey } = {}) {
+    const root = ensureAdvancedRoot(alert);
+    if (!root) {
+      return null;
+    }
+    let parentNode = root;
+    if (parentId && parentId !== root.id) {
+      const found = findAdvancedNodeById(alert, parentId);
+      if (!found || !found.node) {
+        return null;
+      }
+      parentNode = found.node;
+    }
+    if (parentNode.type !== "group" && parentNode.type !== "scope") {
+      return null;
+    }
+    if (!Array.isArray(parentNode.children)) {
+      parentNode.children = [];
+    }
+    const scopeObject = parentNode.type === "scope" ? parentNode.object : objectKey;
+    const condition = createAdvancedCondition({}, { objectKey: scopeObject });
+    parentNode.children.push(condition);
+    return condition;
+  }
+
+  function addAdvancedGroupNode(alert, parentId) {
+    const root = ensureAdvancedRoot(alert);
+    if (!root) {
+      return null;
+    }
+    let parentNode = root;
+    if (parentId && parentId !== root.id) {
+      const found = findAdvancedNodeById(alert, parentId);
+      if (!found || !found.node) {
+        return null;
+      }
+      parentNode = found.node;
+    }
+    if (parentNode.type !== "group" && parentNode.type !== "scope") {
+      return null;
+    }
+    if (!Array.isArray(parentNode.children)) {
+      parentNode.children = [];
+    }
+    const group = createAdvancedGroup({});
+    parentNode.children.push(group);
+    return group;
+  }
+
+  function addAdvancedAggregate(alert, parentId) {
+    const root = ensureAdvancedRoot(alert);
+    if (!root) {
+      return null;
+    }
+    let parentNode = root;
+    if (parentId && parentId !== root.id) {
+      const found = findAdvancedNodeById(alert, parentId);
+      if (!found || !found.node || found.node.type !== "group") {
+        return null;
+      }
+      parentNode = found.node;
+    }
+    if (!Array.isArray(parentNode.children)) {
+      parentNode.children = [];
+    }
+    const aggregate = createAdvancedAggregate({});
+    parentNode.children.push(aggregate);
+    return aggregate;
+  }
+
+  function ensureAdvancedAggregateCriteria(alert, aggregateId) {
+    const found = findAdvancedNodeById(alert, aggregateId);
+    if (!found || !found.node || found.node.type !== "aggregate") {
+      return null;
+    }
+    if (!found.node.criteria) {
+      found.node.criteria = createAdvancedGroup({});
+    }
+    return found.node.criteria;
+  }
+
+  function removeAdvancedNode(alert, nodeId) {
+    const root = ensureAdvancedRoot(alert);
+    if (!root || !nodeId || root.id === nodeId) {
+      return false;
+    }
+    let removed = false;
+    visitAdvancedNodes(root, (node, parent, meta) => {
+      if (!node || node.id !== nodeId || !parent || !meta) {
+        return false;
+      }
+      if (meta.key === "children" && Array.isArray(parent.children)) {
+        parent.children.splice(meta.index, 1);
+        removed = true;
+      }
+      if (meta.key === "criteria") {
+        parent.criteria = null;
+        removed = true;
+      }
+      return removed;
+    });
+    return removed;
+  }
+
   function cloneAlertState(alert) {
     const filters = Array.isArray(alert?.filters)
       ? alert.filters.map((filter) => createAlertFilter(filter))
@@ -242,10 +616,18 @@
     if (!filters.length) {
       filters.push(createAlertFilter());
     }
+    const mode =
+      typeof alert?.mode === "string" && alert.mode === ADVANCED_ALERT_MODES.ADVANCED
+        ? ADVANCED_ALERT_MODES.ADVANCED
+        : ADVANCED_ALERT_MODES.SIMPLE;
+    const advancedRoot = cloneAdvancedNode(alert?.advanced) || createDefaultAdvancedRoot();
+    ensureAdvancedRoot({ advanced: advancedRoot });
     return {
       id: typeof alert?.id === "string" && alert.id ? alert.id : generateAlertId(),
       label: typeof alert?.label === "string" ? alert.label : "",
+      mode,
       filters,
+      advanced: advancedRoot,
     };
   }
 
@@ -299,6 +681,9 @@
     if (field.actualValue) {
       parts.push(`[${field.actualValue}]`);
     }
+    if (field.message) {
+      parts.push(field.message);
+    }
     return parts.filter(Boolean).join(" ");
   }
 
@@ -325,6 +710,9 @@
       if (fieldDescriptions.length) {
         const description = fieldDescriptions.join("; ");
         line = line ? `${line}: ${description}` : description;
+      }
+      if (detail.message) {
+        line = line ? `${line} — ${detail.message}` : detail.message;
       }
       if (line) {
         lines.push(line);
@@ -2158,6 +2546,29 @@
       }
     }
 
+    function updateAdvancedConditionValueState(alertId, nodeId) {
+      if (!setupAlertList) {
+        return;
+      }
+      const selector = `input[data-role="advanced-value"][data-alert-id="${alertId}"][data-node-id="${nodeId}"]`;
+      const input = setupAlertList.querySelector(selector);
+      const alert = findAlertById(alertId);
+      if (!input || !alert) {
+        return;
+      }
+      const found = findAdvancedNodeById(alert, nodeId);
+      if (!found || !found.node || found.node.type !== "condition") {
+        return;
+      }
+      const operator = normalizeOperator(found.node.operator);
+      const needsValue = operatorRequiresValue(operator);
+      input.disabled = !needsValue;
+      if (!needsValue) {
+        input.value = "";
+        found.node.value = "";
+      }
+    }
+
     function loadAlertFieldSuggestions(alertId, filterId) {
       const alert = findAlertById(alertId);
       const filter = findAlertFilter(alert, filterId);
@@ -2177,6 +2588,659 @@
             showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
           }
         });
+    }
+
+    function renderAdvancedBuilder(alert, container, { alertObjects }) {
+      container.innerHTML = "";
+      const root = ensureAdvancedRoot(alert);
+      if (!root) {
+        return;
+      }
+      const intro = document.createElement("p");
+      intro.className = "small text-muted mb-2";
+      intro.innerHTML = translateKey("account_explorer.setup.alerts.advanced.builder_intro");
+      container.appendChild(intro);
+      const rootElement = renderAdvancedNode(alert, root, {
+        alertObjects,
+        isRoot: true,
+        allowScope: true,
+        allowAggregate: true,
+        parentScope: null,
+      });
+      if (rootElement) {
+        container.appendChild(rootElement);
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey("account_explorer.setup.alerts.advanced.empty");
+        container.appendChild(empty);
+      }
+    }
+
+    function renderAdvancedNode(alert, node, options = {}) {
+      if (!node || typeof node !== "object") {
+        return null;
+      }
+      if (node.type === "group") {
+        return renderAdvancedGroupNode(alert, node, options);
+      }
+      if (node.type === "scope") {
+        return renderAdvancedScopeNode(alert, node, options);
+      }
+      if (node.type === "condition") {
+        return renderAdvancedConditionNode(alert, node, options);
+      }
+      if (node.type === "aggregate") {
+        return renderAdvancedAggregateNode(alert, node, options);
+      }
+      return null;
+    }
+
+    function renderAdvancedGroupNode(alert, node, options = {}) {
+      const element = document.createElement("div");
+      element.className = "advanced-node advanced-node-group";
+      element.dataset.nodeId = node.id;
+      element.dataset.alertId = alert.id;
+
+      const header = document.createElement("div");
+      header.className = "advanced-node-header d-flex flex-wrap align-items-center gap-2";
+      const title = document.createElement("span");
+      title.className = "fw-semibold small";
+      title.textContent = options.isRoot
+        ? translateKey("account_explorer.setup.alerts.advanced.group_root_label")
+        : translateKey("account_explorer.setup.alerts.advanced.group_label");
+      header.appendChild(title);
+
+      const logicSelect = document.createElement("select");
+      logicSelect.className = "form-select form-select-sm w-auto";
+      logicSelect.dataset.alertId = alert.id;
+      logicSelect.dataset.nodeId = node.id;
+      logicSelect.dataset.role = "advanced-logic";
+      ADVANCED_GROUP_OPTIONS.forEach((option) => {
+        const logicOption = document.createElement("option");
+        logicOption.value = option.value;
+        logicOption.textContent = translateKey(option.labelKey);
+        logicSelect.appendChild(logicOption);
+      });
+      logicSelect.value = normalizeAdvancedGroupLogic(node.logic);
+      header.appendChild(logicSelect);
+
+      if (!options.isRoot) {
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "btn btn-outline-danger btn-sm";
+        removeButton.dataset.action = "remove-advanced-node";
+        removeButton.dataset.alertId = alert.id;
+        removeButton.dataset.nodeId = node.id;
+        removeButton.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.remove_group"
+        );
+        header.appendChild(removeButton);
+      }
+
+      element.appendChild(header);
+
+      const body = document.createElement("div");
+      body.className = "advanced-node-body";
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length) {
+        children.forEach((child) => {
+          const childElement = renderAdvancedNode(alert, child, {
+            alertObjects: options.alertObjects,
+            isRoot: false,
+            allowScope: options.parentScope ? false : options.allowScope,
+            allowAggregate: options.parentScope ? false : options.allowAggregate,
+            parentScope: options.parentScope || null,
+          });
+          if (childElement) {
+            body.appendChild(childElement);
+          }
+        });
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.group_empty"
+        );
+        body.appendChild(empty);
+      }
+      element.appendChild(body);
+
+      const actions = document.createElement("div");
+      actions.className = "advanced-node-actions d-flex flex-wrap gap-2 mt-2";
+      if (options.allowScope !== false && !options.parentScope) {
+        const scopeButton = document.createElement("button");
+        scopeButton.type = "button";
+        scopeButton.className = "btn btn-outline-primary btn-sm";
+        scopeButton.dataset.action = "add-advanced-scope";
+        scopeButton.dataset.alertId = alert.id;
+        scopeButton.dataset.parentId = node.id;
+        scopeButton.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.add_scope"
+        );
+        actions.appendChild(scopeButton);
+      }
+
+      const conditionButton = document.createElement("button");
+      conditionButton.type = "button";
+      conditionButton.className = "btn btn-outline-primary btn-sm";
+      conditionButton.dataset.action = "add-advanced-condition";
+      conditionButton.dataset.alertId = alert.id;
+      conditionButton.dataset.parentId = node.id;
+      conditionButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.add_condition"
+      );
+      actions.appendChild(conditionButton);
+
+      const groupButton = document.createElement("button");
+      groupButton.type = "button";
+      groupButton.className = "btn btn-outline-primary btn-sm";
+      groupButton.dataset.action = "add-advanced-group";
+      groupButton.dataset.alertId = alert.id;
+      groupButton.dataset.parentId = node.id;
+      groupButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.add_group"
+      );
+      actions.appendChild(groupButton);
+
+      if (options.allowAggregate !== false && !options.parentScope) {
+        const aggregateButton = document.createElement("button");
+        aggregateButton.type = "button";
+        aggregateButton.className = "btn btn-outline-primary btn-sm";
+        aggregateButton.dataset.action = "add-advanced-aggregate";
+        aggregateButton.dataset.alertId = alert.id;
+        aggregateButton.dataset.parentId = node.id;
+        aggregateButton.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.add_aggregate"
+        );
+        actions.appendChild(aggregateButton);
+      }
+
+      element.appendChild(actions);
+      return element;
+    }
+
+    function renderAdvancedScopeNode(alert, node, options = {}) {
+      const element = document.createElement("div");
+      element.className = "advanced-node advanced-node-scope";
+      element.dataset.nodeId = node.id;
+      element.dataset.alertId = alert.id;
+
+      const header = document.createElement("div");
+      header.className = "advanced-node-header d-flex flex-wrap align-items-center gap-2";
+
+      const scopeLabel = document.createElement("span");
+      scopeLabel.className = "fw-semibold small";
+      scopeLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.scope_label"
+      );
+      header.appendChild(scopeLabel);
+
+      const objectSelect = document.createElement("select");
+      objectSelect.className = "form-select form-select-sm w-auto";
+      objectSelect.dataset.alertId = alert.id;
+      objectSelect.dataset.nodeId = node.id;
+      objectSelect.dataset.role = "advanced-scope-object";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = translateKey(
+        "account_explorer.setup.alerts.object_placeholder"
+      );
+      objectSelect.appendChild(placeholder);
+      alertObjects.forEach((definition) => {
+        if (!definition) {
+          return;
+        }
+        const option = document.createElement("option");
+        option.value = definition.key;
+        option.textContent = definition.label;
+        objectSelect.appendChild(option);
+      });
+      objectSelect.value = typeof node.object === "string" ? node.object : "";
+      header.appendChild(objectSelect);
+
+      const matchSelect = document.createElement("select");
+      matchSelect.className = "form-select form-select-sm w-auto";
+      matchSelect.dataset.alertId = alert.id;
+      matchSelect.dataset.nodeId = node.id;
+      matchSelect.dataset.role = "advanced-scope-match";
+      ADVANCED_SCOPE_MATCHES.forEach((option) => {
+        const matchOption = document.createElement("option");
+        matchOption.value = option.value;
+        matchOption.textContent = translateKey(option.labelKey);
+        matchSelect.appendChild(matchOption);
+      });
+      matchSelect.value = normalizeAdvancedScopeMatch(node.match);
+      header.appendChild(matchSelect);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "btn btn-outline-danger btn-sm";
+      removeButton.dataset.action = "remove-advanced-node";
+      removeButton.dataset.alertId = alert.id;
+      removeButton.dataset.nodeId = node.id;
+      removeButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.remove_scope"
+      );
+      header.appendChild(removeButton);
+
+      element.appendChild(header);
+
+      const body = document.createElement("div");
+      body.className = "advanced-node-body";
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length) {
+        children.forEach((child) => {
+          const childElement = renderAdvancedNode(alert, child, {
+            alertObjects: options.alertObjects,
+            isRoot: false,
+            allowScope: false,
+            allowAggregate: false,
+            parentScope: node.object || "",
+          });
+          if (childElement) {
+            body.appendChild(childElement);
+          }
+        });
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.scope_empty"
+        );
+        body.appendChild(empty);
+      }
+      element.appendChild(body);
+
+      const actions = document.createElement("div");
+      actions.className = "advanced-node-actions d-flex flex-wrap gap-2 mt-2";
+
+      const conditionButton = document.createElement("button");
+      conditionButton.type = "button";
+      conditionButton.className = "btn btn-outline-primary btn-sm";
+      conditionButton.dataset.action = "add-advanced-condition";
+      conditionButton.dataset.alertId = alert.id;
+      conditionButton.dataset.parentId = node.id;
+      conditionButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.add_condition"
+      );
+      actions.appendChild(conditionButton);
+
+      const groupButton = document.createElement("button");
+      groupButton.type = "button";
+      groupButton.className = "btn btn-outline-primary btn-sm";
+      groupButton.dataset.action = "add-advanced-group";
+      groupButton.dataset.alertId = alert.id;
+      groupButton.dataset.parentId = node.id;
+      groupButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.add_group"
+      );
+      actions.appendChild(groupButton);
+
+      element.appendChild(actions);
+      return element;
+    }
+
+    function renderAdvancedConditionNode(alert, node, options = {}) {
+      const element = document.createElement("div");
+      element.className = "advanced-node advanced-node-condition";
+      element.dataset.nodeId = node.id;
+      element.dataset.alertId = alert.id;
+
+      const header = document.createElement("div");
+      header.className = "advanced-node-header d-flex flex-wrap align-items-center gap-2";
+      const title = document.createElement("span");
+      title.className = "fw-semibold small";
+      title.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.condition_label"
+      );
+      header.appendChild(title);
+
+      if (!options.parentScope) {
+        const objectSelect = document.createElement("select");
+        objectSelect.className = "form-select form-select-sm w-auto";
+        objectSelect.dataset.alertId = alert.id;
+        objectSelect.dataset.nodeId = node.id;
+        objectSelect.dataset.role = "advanced-condition-object";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = translateKey(
+          "account_explorer.setup.alerts.object_placeholder"
+        );
+        objectSelect.appendChild(placeholder);
+        (options.alertObjects || []).forEach((definition) => {
+          if (!definition) {
+            return;
+          }
+          const option = document.createElement("option");
+          option.value = definition.key;
+          option.textContent = definition.label;
+          objectSelect.appendChild(option);
+        });
+        objectSelect.value = typeof node.object === "string" ? node.object : "";
+        header.appendChild(objectSelect);
+      } else {
+        const scopeTag = document.createElement("span");
+        scopeTag.className = "badge bg-secondary text-wrap";
+        scopeTag.textContent = options.parentScope;
+        header.appendChild(scopeTag);
+      }
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "btn btn-outline-danger btn-sm";
+      removeButton.dataset.action = "remove-advanced-node";
+      removeButton.dataset.alertId = alert.id;
+      removeButton.dataset.nodeId = node.id;
+      removeButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.remove_condition"
+      );
+      header.appendChild(removeButton);
+
+      element.appendChild(header);
+
+      const body = document.createElement("div");
+      body.className = "advanced-node-body";
+      const row = document.createElement("div");
+      row.className = "row g-2 align-items-end";
+
+      const fieldCol = document.createElement("div");
+      fieldCol.className = "col-md-4";
+      const fieldLabel = document.createElement("label");
+      fieldLabel.className = "form-label small";
+      fieldLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.field"
+      );
+      fieldLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-field-${alert.id}-${node.id}`
+      );
+      fieldCol.appendChild(fieldLabel);
+      const fieldInput = document.createElement("input");
+      fieldInput.type = "text";
+      fieldInput.className = "form-control form-control-sm";
+      fieldInput.id = `account-explorer-advanced-field-${alert.id}-${node.id}`;
+      fieldInput.value = node.field || "";
+      fieldInput.dataset.alertId = alert.id;
+      fieldInput.dataset.nodeId = node.id;
+      fieldInput.dataset.role = "advanced-field";
+      const objectForField = options.parentScope || node.object || "";
+      if (objectForField) {
+        fieldInput.dataset.object = objectForField;
+      }
+      fieldInput.setAttribute(
+        "list",
+        `account-explorer-advanced-datalist-${alert.id}-${node.id}`
+      );
+      const fieldDatalist = document.createElement("datalist");
+      fieldDatalist.id = `account-explorer-advanced-datalist-${alert.id}-${node.id}`;
+      fieldCol.appendChild(fieldInput);
+      fieldCol.appendChild(fieldDatalist);
+      row.appendChild(fieldCol);
+
+      const operatorCol = document.createElement("div");
+      operatorCol.className = "col-md-3";
+      const operatorLabel = document.createElement("label");
+      operatorLabel.className = "form-label small";
+      operatorLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.operator"
+      );
+      operatorLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-operator-${alert.id}-${node.id}`
+      );
+      operatorCol.appendChild(operatorLabel);
+      const operatorSelect = document.createElement("select");
+      operatorSelect.className = "form-select form-select-sm";
+      operatorSelect.id = `account-explorer-advanced-operator-${alert.id}-${node.id}`;
+      operatorSelect.dataset.alertId = alert.id;
+      operatorSelect.dataset.nodeId = node.id;
+      operatorSelect.dataset.role = "advanced-condition-operator";
+      ALERT_OPERATORS.forEach((operator) => {
+        const option = document.createElement("option");
+        option.value = operator.value;
+        option.textContent = translateKey(operator.labelKey);
+        operatorSelect.appendChild(option);
+      });
+      operatorSelect.value = normalizeOperator(node.operator);
+      operatorCol.appendChild(operatorSelect);
+      row.appendChild(operatorCol);
+
+      const valueCol = document.createElement("div");
+      valueCol.className = "col-md-3";
+      const valueLabel = document.createElement("label");
+      valueLabel.className = "form-label small";
+      valueLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.value"
+      );
+      valueLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-value-${alert.id}-${node.id}`
+      );
+      valueCol.appendChild(valueLabel);
+      const valueInput = document.createElement("input");
+      valueInput.type = "text";
+      valueInput.className = "form-control form-control-sm";
+      valueInput.id = `account-explorer-advanced-value-${alert.id}-${node.id}`;
+      valueInput.value = node.value || "";
+      valueInput.placeholder = translateKey(
+        "account_explorer.setup.alerts.value_placeholder"
+      );
+      valueInput.dataset.alertId = alert.id;
+      valueInput.dataset.nodeId = node.id;
+      valueInput.dataset.role = "advanced-value";
+      valueCol.appendChild(valueInput);
+      row.appendChild(valueCol);
+
+      body.appendChild(row);
+      element.appendChild(body);
+
+      updateAdvancedConditionValueState(alert.id, node.id);
+      return element;
+    }
+
+    function renderAdvancedAggregateNode(alert, node, options = {}) {
+      const element = document.createElement("div");
+      element.className = "advanced-node advanced-node-aggregate";
+      element.dataset.nodeId = node.id;
+      element.dataset.alertId = alert.id;
+
+      const header = document.createElement("div");
+      header.className = "advanced-node-header d-flex flex-wrap align-items-center gap-2";
+      const title = document.createElement("span");
+      title.className = "fw-semibold small";
+      title.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.aggregate_label"
+      );
+      header.appendChild(title);
+
+      const objectSelect = document.createElement("select");
+      objectSelect.className = "form-select form-select-sm w-auto";
+      objectSelect.dataset.alertId = alert.id;
+      objectSelect.dataset.nodeId = node.id;
+      objectSelect.dataset.role = "advanced-aggregate-object";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = translateKey(
+        "account_explorer.setup.alerts.object_placeholder"
+      );
+      objectSelect.appendChild(placeholder);
+      (options.alertObjects || []).forEach((definition) => {
+        if (!definition) {
+          return;
+        }
+        const option = document.createElement("option");
+        option.value = definition.key;
+        option.textContent = definition.label;
+        objectSelect.appendChild(option);
+      });
+      objectSelect.value = typeof node.object === "string" ? node.object : "";
+      header.appendChild(objectSelect);
+
+      const operationSelect = document.createElement("select");
+      operationSelect.className = "form-select form-select-sm w-auto";
+      operationSelect.dataset.alertId = alert.id;
+      operationSelect.dataset.nodeId = node.id;
+      operationSelect.dataset.role = "advanced-aggregate-operation";
+      ADVANCED_AGGREGATE_OPERATIONS.forEach((definition) => {
+        const option = document.createElement("option");
+        option.value = definition.value;
+        option.textContent = translateKey(definition.labelKey);
+        operationSelect.appendChild(option);
+      });
+      operationSelect.value = normalizeAdvancedAggregateOperation(node.operation);
+      header.appendChild(operationSelect);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "btn btn-outline-danger btn-sm";
+      removeButton.dataset.action = "remove-advanced-node";
+      removeButton.dataset.alertId = alert.id;
+      removeButton.dataset.nodeId = node.id;
+      removeButton.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.remove_aggregate"
+      );
+      header.appendChild(removeButton);
+
+      element.appendChild(header);
+
+      const description = document.createElement("p");
+      description.className = "small text-muted mb-2";
+      description.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.aggregate_description"
+      );
+      element.appendChild(description);
+
+      const body = document.createElement("div");
+      body.className = "advanced-node-body";
+      const row = document.createElement("div");
+      row.className = "row g-2";
+
+      const fieldCol = document.createElement("div");
+      fieldCol.className = "col-md-4";
+      const fieldLabel = document.createElement("label");
+      fieldLabel.className = "form-label small";
+      fieldLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.aggregate_field"
+      );
+      fieldLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-aggregate-field-${alert.id}-${node.id}`
+      );
+      fieldCol.appendChild(fieldLabel);
+      const fieldInput = document.createElement("input");
+      fieldInput.type = "text";
+      fieldInput.className = "form-control form-control-sm";
+      fieldInput.id = `account-explorer-advanced-aggregate-field-${alert.id}-${node.id}`;
+      fieldInput.value = node.field || "";
+      fieldInput.dataset.alertId = alert.id;
+      fieldInput.dataset.nodeId = node.id;
+      fieldInput.dataset.role = "advanced-aggregate-field";
+      if (node.object) {
+        fieldInput.dataset.object = node.object;
+      }
+      fieldInput.setAttribute(
+        "list",
+        `account-explorer-advanced-aggregate-datalist-${alert.id}-${node.id}`
+      );
+      const fieldDatalist = document.createElement("datalist");
+      fieldDatalist.id = `account-explorer-advanced-aggregate-datalist-${alert.id}-${node.id}`;
+      fieldCol.appendChild(fieldInput);
+      fieldCol.appendChild(fieldDatalist);
+      row.appendChild(fieldCol);
+
+      const minCountCol = document.createElement("div");
+      minCountCol.className = "col-md-3";
+      const minCountLabel = document.createElement("label");
+      minCountLabel.className = "form-label small";
+      minCountLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.aggregate_min_count"
+      );
+      minCountLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-aggregate-min-${alert.id}-${node.id}`
+      );
+      minCountCol.appendChild(minCountLabel);
+      const minCountInput = document.createElement("input");
+      minCountInput.type = "number";
+      minCountInput.min = "2";
+      minCountInput.step = "1";
+      minCountInput.className = "form-control form-control-sm";
+      minCountInput.id = `account-explorer-advanced-aggregate-min-${alert.id}-${node.id}`;
+      minCountInput.value = String(node.minCount || 2);
+      minCountInput.dataset.alertId = alert.id;
+      minCountInput.dataset.nodeId = node.id;
+      minCountInput.dataset.role = "advanced-aggregate-min-count";
+      minCountCol.appendChild(minCountInput);
+      row.appendChild(minCountCol);
+
+      const distinctCol = document.createElement("div");
+      distinctCol.className = "col-md-4";
+      const distinctLabel = document.createElement("label");
+      distinctLabel.className = "form-label small";
+      distinctLabel.textContent = translateKey(
+        "account_explorer.setup.alerts.advanced.aggregate_distinct_field"
+      );
+      distinctLabel.setAttribute(
+        "for",
+        `account-explorer-advanced-aggregate-distinct-${alert.id}-${node.id}`
+      );
+      distinctCol.appendChild(distinctLabel);
+      const distinctInput = document.createElement("input");
+      distinctInput.type = "text";
+      distinctInput.className = "form-control form-control-sm";
+      distinctInput.id = `account-explorer-advanced-aggregate-distinct-${alert.id}-${node.id}`;
+      distinctInput.value = node.distinctField || "";
+      distinctInput.dataset.alertId = alert.id;
+      distinctInput.dataset.nodeId = node.id;
+      distinctInput.dataset.role = "advanced-aggregate-distinct";
+      if (node.object) {
+        distinctInput.dataset.object = node.object;
+      }
+      distinctInput.setAttribute(
+        "list",
+        `account-explorer-advanced-aggregate-distinct-datalist-${alert.id}-${node.id}`
+      );
+      const distinctDatalist = document.createElement("datalist");
+      distinctDatalist.id = `account-explorer-advanced-aggregate-distinct-datalist-${alert.id}-${node.id}`;
+      distinctCol.appendChild(distinctInput);
+      distinctCol.appendChild(distinctDatalist);
+      row.appendChild(distinctCol);
+
+      body.appendChild(row);
+
+      if (node.criteria) {
+        const criteriaHeader = document.createElement("div");
+        criteriaHeader.className = "small fw-semibold mt-3";
+        criteriaHeader.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.aggregate_filters"
+        );
+        body.appendChild(criteriaHeader);
+        const criteriaNode = renderAdvancedNode(alert, node.criteria, {
+          alertObjects: options.alertObjects,
+          isRoot: false,
+          allowScope: false,
+          allowAggregate: false,
+          parentScope: node.object || "",
+        });
+        if (criteriaNode) {
+          body.appendChild(criteriaNode);
+        }
+      } else {
+        const addCriteriaButton = document.createElement("button");
+        addCriteriaButton.type = "button";
+        addCriteriaButton.className = "btn btn-outline-primary btn-sm mt-3";
+        addCriteriaButton.dataset.action = "add-advanced-criteria";
+        addCriteriaButton.dataset.alertId = alert.id;
+        addCriteriaButton.dataset.nodeId = node.id;
+        addCriteriaButton.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.aggregate_add_filter"
+        );
+        body.appendChild(addCriteriaButton);
+      }
+
+      element.appendChild(body);
+      return element;
     }
 
     function renderSetupAlerts() {
@@ -2229,146 +3293,291 @@
         header.appendChild(removeAlertButton);
         card.appendChild(header);
 
-        const filtersContainer = document.createElement("div");
-        filtersContainer.className = "d-grid gap-2";
+        const modeRow = document.createElement("div");
+        modeRow.className = "row g-2 align-items-end";
+        const modeCol = document.createElement("div");
+        modeCol.className = "col-sm-4 col-md-3";
+        const modeLabel = document.createElement("label");
+        modeLabel.className = "form-label small";
+        const modeSelectId = `account-explorer-alert-mode-${alert.id}`;
+        modeLabel.setAttribute("for", modeSelectId);
+        modeLabel.textContent = translateKey("account_explorer.setup.alerts.mode.label");
+        const modeSelect = document.createElement("select");
+        modeSelect.className = "form-select form-select-sm";
+        modeSelect.id = modeSelectId;
+        modeSelect.dataset.alertId = alert.id;
+        modeSelect.dataset.role = "alert-mode";
+        const simpleOption = document.createElement("option");
+        simpleOption.value = ADVANCED_ALERT_MODES.SIMPLE;
+        simpleOption.textContent = translateKey("account_explorer.setup.alerts.mode.simple");
+        const advancedOption = document.createElement("option");
+        advancedOption.value = ADVANCED_ALERT_MODES.ADVANCED;
+        advancedOption.textContent = translateKey("account_explorer.setup.alerts.mode.advanced");
+        modeSelect.appendChild(simpleOption);
+        modeSelect.appendChild(advancedOption);
+        const currentMode =
+          alert.mode === ADVANCED_ALERT_MODES.ADVANCED
+            ? ADVANCED_ALERT_MODES.ADVANCED
+            : ADVANCED_ALERT_MODES.SIMPLE;
+        modeSelect.value = currentMode;
+        modeCol.appendChild(modeLabel);
+        modeCol.appendChild(modeSelect);
+        modeRow.appendChild(modeCol);
 
-        alert.filters.forEach((filter) => {
-          const row = document.createElement("div");
-          row.className = "row g-2 align-items-end";
-          row.dataset.filterId = filter.id;
+        const modeHintCol = document.createElement("div");
+        modeHintCol.className = "col";
+        const modeHint = document.createElement("p");
+        modeHint.className = "small text-muted mb-0";
+        modeHint.innerHTML = translateKey("account_explorer.setup.alerts.mode_hint");
+        modeHintCol.appendChild(modeHint);
+        modeRow.appendChild(modeHintCol);
+        card.appendChild(modeRow);
 
-          const objectCol = document.createElement("div");
-          objectCol.className = "col-md-3";
-          const objectLabel = document.createElement("label");
-          objectLabel.className = "form-label small";
-          const objectSelectId = `account-explorer-alert-object-${alert.id}-${filter.id}`;
-          objectLabel.setAttribute("for", objectSelectId);
-          objectLabel.textContent = translateKey("account_explorer.setup.alerts.object");
-          const objectSelect = document.createElement("select");
-          objectSelect.className = "form-select form-select-sm";
-          objectSelect.id = objectSelectId;
-          objectSelect.dataset.alertId = alert.id;
-          objectSelect.dataset.filterId = filter.id;
-          objectSelect.dataset.role = "alert-object";
-          const objectPlaceholder = document.createElement("option");
-          objectPlaceholder.value = "";
-          objectPlaceholder.textContent = translateKey(
-            "account_explorer.setup.alerts.object_placeholder"
+        if (currentMode === ADVANCED_ALERT_MODES.ADVANCED) {
+          const advancedWrapper = document.createElement("div");
+          advancedWrapper.className = "advanced-alert-wrapper mt-3";
+          renderAdvancedBuilder(alert, advancedWrapper, { alertObjects });
+          card.appendChild(advancedWrapper);
+        } else {
+          const filtersContainer = document.createElement("div");
+          filtersContainer.className = "d-grid gap-2 mt-3";
+
+          alert.filters.forEach((filter) => {
+            const row = document.createElement("div");
+            row.className = "row g-2 align-items-end";
+            row.dataset.filterId = filter.id;
+
+            const objectCol = document.createElement("div");
+            objectCol.className = "col-md-3";
+            const objectLabel = document.createElement("label");
+            objectLabel.className = "form-label small";
+            const objectSelectId = `account-explorer-alert-object-${alert.id}-${filter.id}`;
+            objectLabel.setAttribute("for", objectSelectId);
+            objectLabel.textContent = translateKey("account_explorer.setup.alerts.object");
+            const objectSelect = document.createElement("select");
+            objectSelect.className = "form-select form-select-sm";
+            objectSelect.id = objectSelectId;
+            objectSelect.dataset.alertId = alert.id;
+            objectSelect.dataset.filterId = filter.id;
+            objectSelect.dataset.role = "alert-object";
+            const objectPlaceholder = document.createElement("option");
+            objectPlaceholder.value = "";
+            objectPlaceholder.textContent = translateKey(
+              "account_explorer.setup.alerts.object_placeholder"
+            );
+            objectSelect.appendChild(objectPlaceholder);
+            alertObjects.forEach((definition) => {
+              if (!definition) {
+                return;
+              }
+              const option = document.createElement("option");
+              option.value = definition.key;
+              option.textContent = definition.label;
+              objectSelect.appendChild(option);
+            });
+            objectSelect.value = filter.object || "";
+            objectCol.appendChild(objectLabel);
+            objectCol.appendChild(objectSelect);
+            row.appendChild(objectCol);
+
+            const fieldCol = document.createElement("div");
+            fieldCol.className = "col-md-3";
+            const fieldLabel = document.createElement("label");
+            fieldLabel.className = "form-label small";
+            const fieldInputId = `account-explorer-alert-field-${alert.id}-${filter.id}`;
+            fieldLabel.setAttribute("for", fieldInputId);
+            fieldLabel.textContent = translateKey("account_explorer.setup.alerts.field");
+            const fieldInput = document.createElement("input");
+            fieldInput.type = "text";
+            fieldInput.className = "form-control form-control-sm";
+            fieldInput.id = fieldInputId;
+            fieldInput.value = filter.field || "";
+            fieldInput.dataset.alertId = alert.id;
+            fieldInput.dataset.filterId = filter.id;
+            fieldInput.dataset.role = "alert-field";
+            const datalistId = `account-explorer-alert-datalist-${alert.id}-${filter.id}`;
+            fieldInput.setAttribute("list", datalistId);
+            fieldInput.addEventListener("focus", () =>
+              loadAlertFieldSuggestions(alert.id, filter.id)
+            );
+            const fieldDatalist = document.createElement("datalist");
+            fieldDatalist.id = datalistId;
+            fieldCol.appendChild(fieldLabel);
+            fieldCol.appendChild(fieldInput);
+            fieldCol.appendChild(fieldDatalist);
+            row.appendChild(fieldCol);
+
+            const operatorCol = document.createElement("div");
+            operatorCol.className = "col-md-3 col-sm-6";
+            const operatorLabel = document.createElement("label");
+            operatorLabel.className = "form-label small";
+            const operatorSelectId = `account-explorer-alert-operator-${alert.id}-${filter.id}`;
+            operatorLabel.setAttribute("for", operatorSelectId);
+            operatorLabel.textContent = translateKey("account_explorer.setup.alerts.operator");
+            const operatorSelect = document.createElement("select");
+            operatorSelect.className = "form-select form-select-sm";
+            operatorSelect.id = operatorSelectId;
+            operatorSelect.dataset.alertId = alert.id;
+            operatorSelect.dataset.filterId = filter.id;
+            operatorSelect.dataset.role = "alert-operator";
+            ALERT_OPERATORS.forEach((operator) => {
+              const option = document.createElement("option");
+              option.value = operator.value;
+              option.textContent = translateKey(operator.labelKey);
+              operatorSelect.appendChild(option);
+            });
+            operatorSelect.value = normalizeOperator(filter.operator);
+            operatorCol.appendChild(operatorLabel);
+            operatorCol.appendChild(operatorSelect);
+            row.appendChild(operatorCol);
+
+            const valueCol = document.createElement("div");
+            valueCol.className = "col-md-3 col-sm-6";
+            const valueLabel = document.createElement("label");
+            valueLabel.className = "form-label small";
+            const valueInputId = `account-explorer-alert-value-${alert.id}-${filter.id}`;
+            valueLabel.setAttribute("for", valueInputId);
+            valueLabel.textContent = translateKey("account_explorer.setup.alerts.value");
+            const valueInput = document.createElement("input");
+            valueInput.type = "text";
+            valueInput.className = "form-control form-control-sm";
+            valueInput.id = valueInputId;
+            valueInput.value = filter.value || "";
+            valueInput.placeholder = translateKey(
+              "account_explorer.setup.alerts.value_placeholder"
+            );
+            valueInput.dataset.alertId = alert.id;
+            valueInput.dataset.filterId = filter.id;
+            valueInput.dataset.role = "alert-value";
+            valueCol.appendChild(valueLabel);
+            valueCol.appendChild(valueInput);
+            row.appendChild(valueCol);
+
+            const removeCol = document.createElement("div");
+            removeCol.className = "col-md-3 col-sm-12";
+            const removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.className = "btn btn-outline-danger btn-sm w-100";
+            removeButton.dataset.action = "delete-filter";
+            removeButton.dataset.alertId = alert.id;
+            removeButton.dataset.filterId = filter.id;
+            removeButton.textContent = translateKey(
+              "account_explorer.setup.alerts.remove_filter"
+            );
+            removeCol.appendChild(removeButton);
+            row.appendChild(removeCol);
+
+            filtersContainer.appendChild(row);
+            updateAlertFilterValueState(alert.id, filter.id);
+          });
+
+          const addFilterWrapper = document.createElement("div");
+          addFilterWrapper.className = "mt-2";
+          const addFilterButton = document.createElement("button");
+          addFilterButton.type = "button";
+          addFilterButton.className = "btn btn-outline-primary btn-sm";
+          addFilterButton.dataset.action = "add-filter";
+          addFilterButton.dataset.alertId = alert.id;
+          addFilterButton.textContent = translateKey(
+            "account_explorer.setup.alerts.add_filter"
           );
-          objectSelect.appendChild(objectPlaceholder);
-          alertObjects.forEach((definition) => {
-            if (!definition) {
-              return;
-            }
-            const option = document.createElement("option");
-            option.value = definition.key;
-            option.textContent = definition.label;
-            objectSelect.appendChild(option);
-          });
-          objectSelect.value = filter.object || "";
-          objectCol.appendChild(objectLabel);
-          objectCol.appendChild(objectSelect);
-          row.appendChild(objectCol);
+          addFilterWrapper.appendChild(addFilterButton);
 
-          const fieldCol = document.createElement("div");
-          fieldCol.className = "col-md-3";
-          const fieldLabel = document.createElement("label");
-          fieldLabel.className = "form-label small";
-          const fieldInputId = `account-explorer-alert-field-${alert.id}-${filter.id}`;
-          fieldLabel.setAttribute("for", fieldInputId);
-          fieldLabel.textContent = translateKey("account_explorer.setup.alerts.field");
-          const fieldInput = document.createElement("input");
-          fieldInput.type = "text";
-          fieldInput.className = "form-control form-control-sm";
-          fieldInput.id = fieldInputId;
-          fieldInput.value = filter.field || "";
-          fieldInput.dataset.alertId = alert.id;
-          fieldInput.dataset.filterId = filter.id;
-          fieldInput.dataset.role = "alert-field";
-          const datalistId = `account-explorer-alert-datalist-${alert.id}-${filter.id}`;
-          fieldInput.setAttribute("list", datalistId);
-          fieldInput.addEventListener("focus", () => loadAlertFieldSuggestions(alert.id, filter.id));
-          const fieldDatalist = document.createElement("datalist");
-          fieldDatalist.id = datalistId;
-          fieldCol.appendChild(fieldLabel);
-          fieldCol.appendChild(fieldInput);
-          fieldCol.appendChild(fieldDatalist);
-          row.appendChild(fieldCol);
-
-          const operatorCol = document.createElement("div");
-          operatorCol.className = "col-md-3 col-sm-6";
-          const operatorLabel = document.createElement("label");
-          operatorLabel.className = "form-label small";
-          const operatorSelectId = `account-explorer-alert-operator-${alert.id}-${filter.id}`;
-          operatorLabel.setAttribute("for", operatorSelectId);
-          operatorLabel.textContent = translateKey("account_explorer.setup.alerts.operator");
-          const operatorSelect = document.createElement("select");
-          operatorSelect.className = "form-select form-select-sm";
-          operatorSelect.id = operatorSelectId;
-          operatorSelect.dataset.alertId = alert.id;
-          operatorSelect.dataset.filterId = filter.id;
-          operatorSelect.dataset.role = "alert-operator";
-          ALERT_OPERATORS.forEach((operator) => {
-            const option = document.createElement("option");
-            option.value = operator.value;
-            option.textContent = translateKey(operator.labelKey);
-            operatorSelect.appendChild(option);
-          });
-          operatorSelect.value = normalizeOperator(filter.operator);
-          operatorCol.appendChild(operatorLabel);
-          operatorCol.appendChild(operatorSelect);
-          row.appendChild(operatorCol);
-
-          const valueCol = document.createElement("div");
-          valueCol.className = "col-md-3 col-sm-6";
-          const valueLabel = document.createElement("label");
-          valueLabel.className = "form-label small";
-          const valueInputId = `account-explorer-alert-value-${alert.id}-${filter.id}`;
-          valueLabel.setAttribute("for", valueInputId);
-          valueLabel.textContent = translateKey("account_explorer.setup.alerts.value");
-          const valueInput = document.createElement("input");
-          valueInput.type = "text";
-          valueInput.className = "form-control form-control-sm";
-          valueInput.id = valueInputId;
-          valueInput.value = filter.value || "";
-          valueInput.placeholder = translateKey("account_explorer.setup.alerts.value_placeholder");
-          valueInput.dataset.alertId = alert.id;
-          valueInput.dataset.filterId = filter.id;
-          valueInput.dataset.role = "alert-value";
-          valueCol.appendChild(valueLabel);
-          valueCol.appendChild(valueInput);
-          row.appendChild(valueCol);
-
-          const removeCol = document.createElement("div");
-          removeCol.className = "col-md-3 col-sm-12";
-          const removeButton = document.createElement("button");
-          removeButton.type = "button";
-          removeButton.className = "btn btn-outline-danger btn-sm w-100";
-          removeButton.dataset.action = "delete-filter";
-          removeButton.dataset.alertId = alert.id;
-          removeButton.dataset.filterId = filter.id;
-          removeButton.textContent = translateKey("account_explorer.setup.alerts.remove_filter");
-          removeCol.appendChild(removeButton);
-          row.appendChild(removeCol);
-
-          filtersContainer.appendChild(row);
-          updateAlertFilterValueState(alert.id, filter.id);
-        });
-
-        const addFilterWrapper = document.createElement("div");
-        addFilterWrapper.className = "mt-2";
-        const addFilterButton = document.createElement("button");
-        addFilterButton.type = "button";
-        addFilterButton.className = "btn btn-outline-primary btn-sm";
-        addFilterButton.dataset.action = "add-filter";
-        addFilterButton.dataset.alertId = alert.id;
-        addFilterButton.textContent = translateKey("account_explorer.setup.alerts.add_filter");
-        addFilterWrapper.appendChild(addFilterButton);
-
-        card.appendChild(filtersContainer);
-        card.appendChild(addFilterWrapper);
+          card.appendChild(filtersContainer);
+          card.appendChild(addFilterWrapper);
+        }
         setupAlertList.appendChild(card);
       });
+    }
+
+    function serializeAdvancedNode(node) {
+      if (!node || typeof node !== "object") {
+        return null;
+      }
+      if (node.type === "group") {
+        const logic = normalizeAdvancedGroupLogic(node.logic);
+        const children = Array.isArray(node.children)
+          ? node.children
+              .map((child) => serializeAdvancedNode(child))
+              .filter(
+                (child) =>
+                  child &&
+                  (child.type === "group" ||
+                    child.type === "condition" ||
+                    child.type === "scope" ||
+                    child.type === "aggregate")
+              )
+          : [];
+        if (!children.length) {
+          return null;
+        }
+        return { type: "group", logic, children };
+      }
+      if (node.type === "condition") {
+        const objectKey = (node.object || "").trim();
+        const fieldName = (node.field || "").trim();
+        const operator = normalizeOperator(node.operator);
+        if (!objectKey || !fieldName || !operator) {
+          return null;
+        }
+        const requiresValue = operatorRequiresValue(operator);
+        const value = (node.value || "").trim();
+        if (requiresValue && !value) {
+          return null;
+        }
+        const entry = { type: "condition", object: objectKey, field: fieldName, operator };
+        if (requiresValue) {
+          entry.value = value;
+        }
+        return entry;
+      }
+      if (node.type === "scope") {
+        const objectKey = (node.object || "").trim();
+        if (!objectKey) {
+          return null;
+        }
+        const match = normalizeAdvancedScopeMatch(node.match);
+        const children = Array.isArray(node.children)
+          ? node.children
+              .map((child) => serializeAdvancedNode(child))
+              .filter((child) => child && (child.type === "condition" || child.type === "group"))
+          : [];
+        if (!children.length) {
+          return null;
+        }
+        return { type: "scope", object: objectKey, match, children };
+      }
+      if (node.type === "aggregate") {
+        const objectKey = (node.object || "").trim();
+        const operation = normalizeAdvancedAggregateOperation(node.operation);
+        if (!objectKey || operation !== "duplicates") {
+          return null;
+        }
+        const fieldName = (node.field || "").trim();
+        if (!fieldName) {
+          return null;
+        }
+        const minCount = Math.max(2, parseInt(node.minCount, 10) || 2);
+        const entry = {
+          type: "aggregate",
+          object: objectKey,
+          operation,
+          field: fieldName,
+          minCount,
+        };
+        const distinctField = (node.distinctField || "").trim();
+        if (distinctField) {
+          entry.distinctField = distinctField;
+        }
+        if (node.criteria) {
+          const criteria = serializeAdvancedNode(node.criteria);
+          if (criteria && (criteria.type === "condition" || criteria.type === "group")) {
+            entry.criteria = criteria;
+          }
+        }
+        return entry;
+      }
+      return null;
     }
 
     function gatherSetupAlerts() {
@@ -2381,6 +3590,19 @@
         const label = (alert.label || "").trim();
         const alertId = typeof alert.id === "string" && alert.id ? alert.id : generateAlertId();
         if (seen.has(alertId)) {
+          return;
+        }
+        const mode =
+          alert.mode === ADVANCED_ALERT_MODES.ADVANCED
+            ? ADVANCED_ALERT_MODES.ADVANCED
+            : ADVANCED_ALERT_MODES.SIMPLE;
+        if (mode === ADVANCED_ALERT_MODES.ADVANCED) {
+          const advancedDefinition = serializeAdvancedNode(alert.advanced);
+          if (!advancedDefinition) {
+            return;
+          }
+          alerts.push({ id: alertId, label, mode, advanced: advancedDefinition });
+          seen.add(alertId);
           return;
         }
         const filters = [];
@@ -2409,7 +3631,7 @@
         if (!filters.length) {
           return;
         }
-        alerts.push({ id: alertId, label, filters });
+        alerts.push({ id: alertId, label, mode, filters });
         seen.add(alertId);
       });
       return alerts;
@@ -2433,6 +3655,46 @@
       if (!alert) {
         return;
       }
+      if (button.dataset.action === "add-advanced-scope") {
+        const parentId = button.dataset.parentId || (alert.advanced && alert.advanced.id);
+        addAdvancedScope(alert, parentId);
+        renderSetupAlerts();
+        return;
+      }
+      if (button.dataset.action === "add-advanced-condition") {
+        const parentId = button.dataset.parentId || (alert.advanced && alert.advanced.id);
+        addAdvancedCondition(alert, parentId);
+        renderSetupAlerts();
+        return;
+      }
+      if (button.dataset.action === "add-advanced-group") {
+        const parentId = button.dataset.parentId || (alert.advanced && alert.advanced.id);
+        addAdvancedGroupNode(alert, parentId);
+        renderSetupAlerts();
+        return;
+      }
+      if (button.dataset.action === "add-advanced-aggregate") {
+        const parentId = button.dataset.parentId || (alert.advanced && alert.advanced.id);
+        addAdvancedAggregate(alert, parentId);
+        renderSetupAlerts();
+        return;
+      }
+      if (button.dataset.action === "remove-advanced-node") {
+        const nodeId = button.dataset.nodeId;
+        if (nodeId) {
+          removeAdvancedNode(alert, nodeId);
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (button.dataset.action === "add-advanced-criteria") {
+        const nodeId = button.dataset.nodeId;
+        if (nodeId) {
+          ensureAdvancedAggregateCriteria(alert, nodeId);
+          renderSetupAlerts();
+        }
+        return;
+      }
       if (button.dataset.action === "add-filter") {
         alert.filters.push(createAlertFilter());
         renderSetupAlerts();
@@ -2454,18 +3716,96 @@
         return;
       }
       const alertId = target.dataset.alertId;
-      const filterId = target.dataset.filterId;
       const alert = findAlertById(alertId);
+      if (!alert) {
+        return;
+      }
+      const role = target.dataset.role;
+      if (role === "alert-mode") {
+        const modeValue = target.value === ADVANCED_ALERT_MODES.ADVANCED
+          ? ADVANCED_ALERT_MODES.ADVANCED
+          : ADVANCED_ALERT_MODES.SIMPLE;
+        alert.mode = modeValue;
+        if (modeValue === ADVANCED_ALERT_MODES.ADVANCED) {
+          ensureAdvancedRoot(alert);
+        }
+        renderSetupAlerts();
+        return;
+      }
+      if (role === "advanced-logic") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "group") {
+          found.node.logic = normalizeAdvancedGroupLogic(target.value);
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-scope-object") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "scope") {
+          found.node.object = target.value;
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-scope-match") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "scope") {
+          found.node.match = normalizeAdvancedScopeMatch(target.value);
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-condition-object") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "condition") {
+          found.node.object = target.value;
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-condition-operator") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "condition") {
+          found.node.operator = normalizeOperator(target.value);
+          updateAdvancedConditionValueState(alertId, nodeId);
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-object") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.object = target.value;
+          renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-operation") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.operation = normalizeAdvancedAggregateOperation(target.value);
+          renderSetupAlerts();
+        }
+        return;
+      }
+      const filterId = target.dataset.filterId;
       const filter = findAlertFilter(alert, filterId);
       if (!filter) {
         return;
       }
-      if (target.dataset.role === "alert-object") {
+      if (role === "alert-object") {
         filter.object = target.value;
         loadAlertFieldSuggestions(alertId, filterId);
         return;
       }
-      if (target.dataset.role === "alert-operator") {
+      if (role === "alert-operator") {
         filter.operator = normalizeOperator(target.value);
         updateAlertFilterValueState(alertId, filterId);
       }
@@ -2486,6 +3826,51 @@
         alert.label = target.value;
         return;
       }
+      if (role === "advanced-field") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "condition") {
+          found.node.field = target.value;
+        }
+        return;
+      }
+      if (role === "advanced-value") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "condition") {
+          found.node.value = target.value;
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-field") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.field = target.value;
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-min-count") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          const parsed = parseInt(target.value, 10);
+          const minValue = Number.isNaN(parsed) ? 2 : Math.max(2, parsed);
+          found.node.minCount = minValue;
+          if (String(minValue) !== target.value) {
+            target.value = String(minValue);
+          }
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-distinct") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.distinctField = target.value;
+        }
+        return;
+      }
       const filterId = target.dataset.filterId;
       const filter = findAlertFilter(alert, filterId);
       if (!filter) {
@@ -2497,6 +3882,38 @@
       if (role === "alert-value") {
         filter.value = target.value;
       }
+    }
+
+    function handleAlertListFocus(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      const role = target.dataset.role;
+      if (
+        role !== "advanced-field" &&
+        role !== "advanced-aggregate-field" &&
+        role !== "advanced-aggregate-distinct"
+      ) {
+        return;
+      }
+      const objectKey = target.dataset.object;
+      if (!objectKey) {
+        return;
+      }
+      loadFieldsForObject(objectKey)
+        .then((fields) => {
+          const datalistId = target.getAttribute("list");
+          const datalist = datalistId ? document.getElementById(datalistId) : null;
+          populateDatalistElement(datalist, fields);
+        })
+        .catch((error) => {
+          if (error instanceof Error && error.message === "no_org") {
+            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
+          } else {
+            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+          }
+        });
     }
 
     function openSetupModal() {
@@ -2641,6 +4058,7 @@
       setupAlertList.addEventListener("click", handleAlertListClick);
       setupAlertList.addEventListener("change", handleAlertListChange);
       setupAlertList.addEventListener("input", handleAlertListInput);
+      setupAlertList.addEventListener("focusin", handleAlertListFocus);
     }
     if (setupObjectList) {
       setupObjectList.addEventListener("click", (event) => {

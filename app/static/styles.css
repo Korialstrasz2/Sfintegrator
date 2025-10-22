@@ -650,6 +650,70 @@ body.theme-sci-fi {
   font-weight: 600;
 }
 
+.advanced-alert-wrapper {
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background-color: rgba(var(--bs-primary-rgb), 0.02);
+}
+
+.advanced-node {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(var(--bs-primary-rgb), 0.04);
+}
+
+.advanced-node + .advanced-node {
+  margin-top: 1rem;
+}
+
+.advanced-node-header {
+  margin-bottom: 0.5rem;
+}
+
+.advanced-node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.advanced-node-actions {
+  margin-top: 0.5rem;
+  gap: 0.5rem;
+}
+
+.advanced-node-actions .btn {
+  min-width: 10rem;
+}
+
+.advanced-node-aggregate {
+  background-color: rgba(var(--bs-warning-rgb), 0.08);
+  border-color: rgba(var(--bs-warning-rgb), 0.4);
+}
+
+.advanced-node-aggregate .advanced-node-body {
+  gap: 0.5rem;
+}
+
+.theme-dark .advanced-alert-wrapper,
+.theme-sci-fi .advanced-alert-wrapper {
+  background-color: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.theme-dark .advanced-node,
+.theme-sci-fi .advanced-node {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.theme-dark .advanced-node-aggregate,
+.theme-sci-fi .advanced-node-aggregate {
+  background-color: rgba(255, 193, 7, 0.12);
+  border-color: rgba(255, 193, 7, 0.4);
+}
+
 .account-tree-node--alert {
   border-color: var(--bs-danger);
   box-shadow: 0 0 0 1px rgba(var(--bs-danger-rgb), 0.28) inset,
