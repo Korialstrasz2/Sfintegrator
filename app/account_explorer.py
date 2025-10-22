@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
 import threading
 import uuid
+import keyword
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set, Tuple, Any
 
 from flask import session
 
@@ -124,10 +126,82 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 }
 
 
+_VALID_ALERT_OBJECTS: Set[str] = set(_OBJECT_DEFINITIONS.keys())
+
+
+def _sanitize_identifier(name: str) -> Optional[str]:
+    if not isinstance(name, str) or not name:
+        return None
+    sanitized = re.sub(r"[^0-9a-zA-Z_]", "_", name)
+    if not sanitized:
+        return None
+    if sanitized[0].isdigit():
+        sanitized = f"_{sanitized}"
+    if keyword.iskeyword(sanitized):
+        sanitized = f"{sanitized}_"
+    return sanitized
+
+
+@dataclass
+class AlertDefinition:
+    id: str
+    label: str
+    object_key: str
+    expression: str
+    description: str = ""
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "object": self.object_key,
+            "expression": self.expression,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, object]) -> Optional["AlertDefinition"]:
+        if not isinstance(payload, dict):
+            return None
+        raw_id = payload.get("id")
+        alert_id = str(raw_id).strip() if isinstance(raw_id, str) and raw_id.strip() else str(uuid.uuid4())
+        raw_label = payload.get("label")
+        if not isinstance(raw_label, str):
+            raw_label = ""
+        label = raw_label.strip()
+        raw_object = payload.get("object") or payload.get("objectKey")
+        object_candidate = str(raw_object or "").strip()
+        normalized_object = None
+        if object_candidate:
+            for candidate in _VALID_ALERT_OBJECTS:
+                if candidate.lower() == object_candidate.lower():
+                    normalized_object = candidate
+                    break
+        if not normalized_object:
+            return None
+        object_key = normalized_object
+        raw_expression = payload.get("expression")
+        if not isinstance(raw_expression, str):
+            raw_expression = ""
+        expression = raw_expression.strip()
+        raw_description = payload.get("description")
+        if not isinstance(raw_description, str):
+            raw_description = ""
+        description = raw_description.strip()
+        return cls(
+            id=alert_id,
+            label=label,
+            object_key=object_key,
+            expression=expression,
+            description=description,
+        )
+
+
 @dataclass
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
     objects: List[Dict[str, object]] = field(default_factory=list)
+    alerts: List[AlertDefinition] = field(default_factory=list)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
@@ -152,6 +226,7 @@ class ExplorerConfig:
                 for item in self.objects
                 if isinstance(item, dict) and item.get("key")
             ],
+            "alerts": [alert.to_dict() for alert in self.alerts],
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
         }
@@ -176,6 +251,9 @@ class ExplorerConfig:
                 continue
             configured.append({**definition, "hidden": False})
         return configured
+
+    def get_alerts(self) -> List[AlertDefinition]:
+        return list(self.alerts)
 
 
 @dataclass
@@ -302,12 +380,24 @@ def get_session() -> ExplorerSession:
 
 def get_config() -> ExplorerConfig:
     if not CONFIG_FILE.exists():
-        return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+        return ExplorerConfig(
+            fields={},
+            objects=[],
+            alerts=[],
+            view_mode=_DEFAULT_VIEW_MODE,
+            updated_at=None,
+        )
     with _config_lock:
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+            return ExplorerConfig(
+                fields={},
+                objects=[],
+                alerts=[],
+                view_mode=_DEFAULT_VIEW_MODE,
+                updated_at=None,
+            )
         fields = data.get("fields") if isinstance(data, dict) else {}
         if not isinstance(fields, dict):
             fields = {}
@@ -340,10 +430,29 @@ def get_config() -> ExplorerConfig:
         view_mode = view_mode_raw if isinstance(view_mode_raw, str) else _DEFAULT_VIEW_MODE
         if view_mode not in _VALID_VIEW_MODES:
             view_mode = _DEFAULT_VIEW_MODE
+        alerts_payload = data.get("alerts") if isinstance(data, dict) else []
+        alerts: List[AlertDefinition] = []
+        seen_alert_ids: Set[str] = set()
+        if isinstance(alerts_payload, list):
+            for item in alerts_payload:
+                alert = AlertDefinition.from_payload(item)
+                if not alert:
+                    continue
+                if alert.id in seen_alert_ids:
+                    alert = AlertDefinition(
+                        id=str(uuid.uuid4()),
+                        label=alert.label,
+                        object_key=alert.object_key,
+                        expression=alert.expression,
+                        description=alert.description,
+                    )
+                alerts.append(alert)
+                seen_alert_ids.add(alert.id)
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
         return ExplorerConfig(
             fields=result,
             objects=objects,
+            alerts=alerts,
             view_mode=view_mode,
             updated_at=updated_at,
         )
@@ -357,6 +466,7 @@ def save_config(config: ExplorerConfig) -> None:
             for item in config.objects
             if isinstance(item, dict) and item.get("key")
         ],
+        "alerts": [alert.to_dict() for alert in config.alerts],
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
     }
@@ -371,6 +481,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     existing = get_config()
     sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
+    sanitized_alerts: List[AlertDefinition] = list(existing.alerts)
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
 
     fields_payload = payload.get("fields") if "fields" in payload else None
@@ -409,6 +520,26 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
             seen.add(key)
         sanitized_objects = objects
 
+    alerts_payload = payload.get("alerts") if "alerts" in payload else None
+    if isinstance(alerts_payload, Sequence) and not isinstance(alerts_payload, (str, bytes)):
+        alerts: List[AlertDefinition] = []
+        seen_ids: Set[str] = set()
+        for item in alerts_payload:
+            alert = AlertDefinition.from_payload(item)
+            if not alert:
+                continue
+            if alert.id in seen_ids:
+                alert = AlertDefinition(
+                    id=str(uuid.uuid4()),
+                    label=alert.label,
+                    object_key=alert.object_key,
+                    expression=alert.expression,
+                    description=alert.description,
+                )
+            alerts.append(alert)
+            seen_ids.add(alert.id)
+        sanitized_alerts = alerts
+
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -420,6 +551,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     config = ExplorerConfig(
         fields=sanitized_fields,
         objects=sanitized_objects,
+        alerts=sanitized_alerts,
         view_mode=view_mode,
         updated_at=timestamp,
     )
@@ -646,6 +778,478 @@ def _aggregate_contact_points(
     return mapping
 
 
+class AlertEvaluationError(Exception):
+    pass
+
+
+class AlertRecord:
+    def __init__(self, data: Optional[Dict[str, Any]] = None):
+        self._data: Dict[str, Any] = dict(data or {})
+        self._lookup: Dict[str, Any] = {}
+        for key, value in self._data.items():
+            if isinstance(key, str):
+                lowered = key.lower()
+                if lowered not in self._lookup:
+                    self._lookup[lowered] = value
+        self._locals_cache: Optional[Dict[str, Any]] = None
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        key = name.lower()
+        if key in self._lookup:
+            return self._lookup[key]
+        raise AttributeError(name)
+
+    def __getitem__(self, key: str) -> Any:
+        if not isinstance(key, str):
+            raise KeyError(key)
+        lowered = key.lower()
+        if lowered in self._lookup:
+            return self._lookup[lowered]
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if not isinstance(key, str):
+            return default
+        return self._lookup.get(key.lower(), default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return dict(self._data)
+
+    def as_locals(self) -> Dict[str, Any]:
+        if self._locals_cache is None:
+            locals_dict: Dict[str, Any] = {}
+            for key, value in self._data.items():
+                if not isinstance(key, str) or not key:
+                    continue
+                identifier = _sanitize_identifier(key)
+                if not identifier:
+                    continue
+                if identifier not in locals_dict:
+                    locals_dict[identifier] = value
+                lower_identifier = identifier.lower()
+                if lower_identifier not in locals_dict:
+                    locals_dict[lower_identifier] = value
+            self._locals_cache = locals_dict
+        return dict(self._locals_cache)
+
+
+class RecordsNamespace:
+    def __init__(self, records_by_object: Dict[str, Sequence[AlertRecord]]):
+        self._records: Dict[str, List[AlertRecord]] = {}
+        self._index: Dict[str, str] = {}
+        for key, records in records_by_object.items():
+            if not isinstance(key, str):
+                continue
+            wrapped: List[AlertRecord] = []
+            for record in records or []:
+                if isinstance(record, AlertRecord):
+                    wrapped.append(record)
+                elif isinstance(record, dict):
+                    wrapped.append(AlertRecord(record))
+            self._records[key] = wrapped
+            self._index[key.lower()] = key
+
+    def _resolve(self, key: str) -> str:
+        normalized = self._index.get(key.lower())
+        if not normalized:
+            raise KeyError(key)
+        return normalized
+
+    def __getattr__(self, name: str) -> List[AlertRecord]:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            normalized = self._resolve(name)
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+        return list(self._records.get(normalized, []))
+
+    def __getitem__(self, key: str) -> List[AlertRecord]:
+        if not isinstance(key, str):
+            raise KeyError(key)
+        normalized = self._resolve(key)
+        return list(self._records.get(normalized, []))
+
+    def get(self, key: str, default: Optional[Sequence[AlertRecord]] = None) -> List[AlertRecord]:
+        try:
+            return self[key]
+        except KeyError:
+            return list(default or [])
+
+    def keys(self) -> List[str]:
+        return list(self._records.keys())
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) == 0
+    return False
+
+
+def _not_blank(value: Any) -> bool:
+    return not _is_blank(value)
+
+
+def _equals_ignore_case(left: Any, right: Any) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    if isinstance(left, str) and isinstance(right, str):
+        return left.casefold() == right.casefold()
+    return left == right
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if not _is_blank(value):
+            return value
+    return values[-1] if values else None
+
+
+def _casefold(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.casefold()
+    return value
+
+
+def _hashable_value(value: Any, *, case_insensitive: bool = False) -> Any:
+    candidate = _casefold(value) if case_insensitive and isinstance(value, str) else value
+    try:
+        hash(candidate)
+        return candidate
+    except TypeError:
+        return repr(candidate)
+
+
+def _alert_values(
+    records: Sequence[Any],
+    field_name: str,
+    *,
+    unique: bool = False,
+    case_insensitive: bool = False,
+    drop_blank: bool = False,
+) -> List[Any]:
+    if not isinstance(field_name, str) or not field_name:
+        return []
+    values: List[Any] = []
+    for record in records or []:
+        if isinstance(record, AlertRecord):
+            value = record.get(field_name)
+        elif isinstance(record, dict):
+            value = record.get(field_name)
+        else:
+            continue
+        if drop_blank and _is_blank(value):
+            continue
+        if case_insensitive and isinstance(value, str):
+            values.append(value.casefold())
+        else:
+            values.append(value)
+    if not unique:
+        return values
+    seen: Set[Any] = set()
+    unique_values: List[Any] = []
+    for value in values:
+        candidate = _hashable_value(value, case_insensitive=case_insensitive)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique_values.append(value)
+    return unique_values
+
+
+def _unique_values(values: Sequence[Any], *, case_insensitive: bool = False, drop_blank: bool = False) -> List[Any]:
+    filtered: List[Any] = []
+    for value in values or []:
+        if drop_blank and _is_blank(value):
+            continue
+        filtered.append(value)
+    seen: Set[Any] = set()
+    unique_values: List[Any] = []
+    for value in filtered:
+        candidate = _hashable_value(value, case_insensitive=case_insensitive)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique_values.append(value)
+    return unique_values
+
+
+def _duplicate_values(
+    values: Sequence[Any],
+    *,
+    case_insensitive: bool = False,
+    drop_blank: bool = True,
+) -> List[Any]:
+    seen: Dict[Any, int] = {}
+    duplicates: List[Any] = []
+    for value in values or []:
+        candidate = _hashable_value(value, case_insensitive=case_insensitive)
+        if drop_blank and _is_blank(candidate):
+            continue
+        count = seen.get(candidate, 0) + 1
+        seen[candidate] = count
+        if count == 2:
+            duplicates.append(value)
+    return duplicates
+
+
+def _has_duplicates(
+    values: Sequence[Any],
+    *,
+    case_insensitive: bool = False,
+    drop_blank: bool = True,
+) -> bool:
+    return bool(_duplicate_values(values, case_insensitive=case_insensitive, drop_blank=drop_blank))
+
+
+def _count_if(records: Sequence[Any], predicate) -> int:
+    count = 0
+    for record in records or []:
+        wrapped = record if isinstance(record, AlertRecord) else AlertRecord(record if isinstance(record, dict) else {})
+        try:
+            if predicate(wrapped):
+                count += 1
+        except Exception:
+            continue
+    return count
+
+
+def _any_match(records: Sequence[Any], predicate) -> bool:
+    for record in records or []:
+        wrapped = record if isinstance(record, AlertRecord) else AlertRecord(record if isinstance(record, dict) else {})
+        try:
+            if predicate(wrapped):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _all_match(records: Sequence[Any], predicate) -> bool:
+    has_items = False
+    for record in records or []:
+        wrapped = record if isinstance(record, AlertRecord) else AlertRecord(record if isinstance(record, dict) else {})
+        has_items = True
+        try:
+            if not predicate(wrapped):
+                return False
+        except Exception:
+            return False
+    return has_items
+
+
+_ALERT_GLOBAL_FUNCTIONS: Dict[str, Any] = {
+    "is_blank": _is_blank,
+    "not_blank": _not_blank,
+    "equals_ignore_case": _equals_ignore_case,
+    "coalesce": _coalesce,
+    "values": _alert_values,
+    "record_values": _alert_values,
+    "unique_values": _unique_values,
+    "duplicate_values": _duplicate_values,
+    "has_duplicates": _has_duplicates,
+    "count_if": _count_if,
+    "any_match": _any_match,
+    "all_match": _all_match,
+    "len": len,
+    "sum": sum,
+    "min": min,
+    "max": max,
+    "sorted": sorted,
+    "set": set,
+    "list": list,
+    "tuple": tuple,
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "str": str,
+    "abs": abs,
+    "any": any,
+    "all": all,
+}
+
+_ALERT_GLOBALS_BASE: Dict[str, Any] = {"__builtins__": {}}
+_ALERT_GLOBALS_BASE.update(_ALERT_GLOBAL_FUNCTIONS)
+
+_ALLOWED_ALERT_NODE_TYPES: Tuple[type, ...] = (
+    ast.Expression,
+    ast.BoolOp,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.Call,
+    ast.Name,
+    ast.Load,
+    ast.Attribute,
+    ast.Subscript,
+    ast.Constant,
+    ast.List,
+    ast.Tuple,
+    ast.Dict,
+    ast.Set,
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Gt,
+    ast.GtE,
+    ast.Lt,
+    ast.LtE,
+    ast.Is,
+    ast.IsNot,
+    ast.In,
+    ast.NotIn,
+    ast.IfExp,
+    ast.ListComp,
+    ast.SetComp,
+    ast.GeneratorExp,
+    ast.DictComp,
+    ast.comprehension,
+    ast.Slice,
+)
+if hasattr(ast, "Index"):
+    _ALLOWED_ALERT_NODE_TYPES = _ALLOWED_ALERT_NODE_TYPES + (ast.Index,)
+
+
+def _prepare_alert_expression(expression: str, object_key: str) -> str:
+    if not expression:
+        return ""
+    sanitized = expression.replace("&&", " and ").replace("||", " or ")
+    sanitized = re.sub(r"(?<![=!<>])!(?!=)", " not ", sanitized)
+    sanitized = re.sub(r"\bnull\b", "None", sanitized, flags=re.IGNORECASE)
+    if object_key:
+        pattern = re.compile(rf"\b{re.escape(object_key)}\.", flags=re.IGNORECASE)
+        sanitized = pattern.sub("record.", sanitized)
+    sanitized = re.sub(r"\bAccount\.", "account.", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\brecord\.record\.", "record.", sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+
+def _validate_alert_ast(node: ast.AST) -> None:
+    if not isinstance(node, _ALLOWED_ALERT_NODE_TYPES):
+        raise AlertEvaluationError(f"unsupported_expression: {type(node).__name__}")
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name):
+            if node.func.id not in _ALERT_GLOBAL_FUNCTIONS:
+                raise AlertEvaluationError(f"unsupported_function: {node.func.id}")
+        elif not isinstance(node.func, ast.Attribute):
+            raise AlertEvaluationError("unsupported_call")
+    for child in ast.iter_child_nodes(node):
+        _validate_alert_ast(child)
+
+
+def _compile_alert_definition(alert: AlertDefinition) -> Optional[ast.AST]:
+    sanitized = _prepare_alert_expression(alert.expression, alert.object_key)
+    if not sanitized:
+        return None
+    try:
+        tree = ast.parse(sanitized, mode="eval")
+    except SyntaxError as exc:
+        raise AlertEvaluationError(str(exc)) from exc
+    _validate_alert_ast(tree)
+    return compile(tree, "<alert>", "eval")
+
+
+def _build_alert_locals(
+    record: AlertRecord,
+    account: AlertRecord,
+    related: RecordsNamespace,
+) -> Dict[str, Any]:
+    locals_payload: Dict[str, Any] = {
+        "record": record,
+        "account": account,
+        "related": related,
+        "records": related,
+    }
+    locals_payload.update(record.as_locals())
+    return locals_payload
+
+
+def _execute_alert_expression(code: ast.AST, locals_payload: Dict[str, Any]) -> Any:
+    globals_payload = dict(_ALERT_GLOBALS_BASE)
+    try:
+        return eval(code, globals_payload, locals_payload)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise AlertEvaluationError(str(exc)) from exc
+
+
+def _format_alert_payload(alert: AlertDefinition) -> Dict[str, str]:
+    label = alert.label or alert.id
+    return {
+        "id": alert.id,
+        "label": label,
+        "description": alert.description,
+        "object": alert.object_key,
+    }
+
+
+def _evaluate_alerts_for_account(
+    compiled_alerts: Sequence[Tuple[AlertDefinition, Optional[ast.AST]]],
+    account_record: Optional[Dict[str, object]],
+    related_records: Dict[str, List[Dict[str, object]]],
+    warnings: Dict[str, str],
+) -> Tuple[
+    List[Dict[str, str]],
+    Dict[str, Dict[str, List[Dict[str, str]]]],
+    Dict[str, Dict[int, List[Dict[str, str]]]],
+]:
+    account_wrapper = AlertRecord(account_record or {})
+    wrapped_by_object: Dict[str, List[AlertRecord]] = {}
+    for object_key, records in related_records.items():
+        wrapped: List[AlertRecord] = []
+        for record in records or []:
+            if isinstance(record, dict):
+                wrapped.append(AlertRecord(record))
+        wrapped_by_object[object_key] = wrapped
+    wrapped_by_object.setdefault("Account", [account_wrapper])
+    related_namespace = RecordsNamespace(wrapped_by_object)
+
+    account_alerts: List[Dict[str, str]] = []
+    alerts_by_record_id: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
+    alerts_by_index: Dict[str, Dict[int, List[Dict[str, str]]]] = {}
+
+    for alert, code in compiled_alerts:
+        if not code:
+            continue
+        try:
+            if alert.object_key == "Account":
+                locals_payload = _build_alert_locals(account_wrapper, account_wrapper, related_namespace)
+                result = _execute_alert_expression(code, locals_payload)
+                if bool(result):
+                    account_alerts.append(_format_alert_payload(alert))
+                continue
+            records = wrapped_by_object.get(alert.object_key, [])
+            if not records:
+                continue
+            alert_info: Optional[Dict[str, str]] = None
+            for index, record in enumerate(records):
+                locals_payload = _build_alert_locals(record, account_wrapper, related_namespace)
+                result = _execute_alert_expression(code, locals_payload)
+                if not bool(result):
+                    continue
+                if alert_info is None:
+                    alert_info = _format_alert_payload(alert)
+                record_id = None
+                raw_id = record.get("Id")
+                if raw_id:
+                    record_id = str(raw_id)
+                    alerts_by_record_id.setdefault(alert.object_key, {}).setdefault(record_id, []).append(alert_info)
+                alerts_by_index.setdefault(alert.object_key, {}).setdefault(index, []).append(alert_info)
+        except AlertEvaluationError as exc:
+            warnings[f"alert:{alert.id}"] = f"Alert '{alert.label or alert.id}' failed: {exc}"
+        except Exception as exc:  # pragma: no cover - unexpected evaluation errors
+            warnings[f"alert:{alert.id}"] = f"Alert '{alert.label or alert.id}' failed: {exc}"  # noqa: TRY401
+
+    return account_alerts, alerts_by_record_id, alerts_by_index
+
+
 def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     sanitized_ids = _sanitize_account_ids(account_ids)
     if not sanitized_ids:
@@ -654,6 +1258,14 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     config = get_config()
     results: Dict[str, List[Dict[str, object]]] = {}
     warnings: Dict[str, str] = {}
+    compiled_alerts: List[Tuple[AlertDefinition, Optional[ast.AST]]] = []
+    for alert in config.get_alerts():
+        try:
+            compiled = _compile_alert_definition(alert)
+        except AlertEvaluationError as exc:
+            warnings[f"alert:{alert.id}"] = f"Alert '{alert.label or alert.id}' failed: {exc}"
+            continue
+        compiled_alerts.append((alert, compiled))
 
     # Query accounts first
     account_query_fields, account_display_fields = _build_query_fields(
@@ -827,14 +1439,17 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 extra_fields=_get_object_link_fields("Account"),
             ),
             "related": {},
+            "alerts": [],
         }
+        account_related_raw: Dict[str, List[Dict[str, object]]] = {}
+        display_fields_map: Dict[str, List[str]] = {}
         for obj in configured_objects:
             key = obj["key"]
             definition = _OBJECT_DEFINITIONS.get(key, {})
             _, display_fields = _build_query_fields(org, key, config)
-            related_records: List[Dict[str, object]]
+            display_fields_map[key] = display_fields
             if key == "Contact":
-                related_records = contact_by_account.get(account_id, [])
+                related_records = list(contact_by_account.get(account_id, []))
             elif key in (
                 "BillingProfile__c",
                 "Contract",
@@ -883,20 +1498,51 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                     related_records = deduped
             else:
                 related_records = []
-            payload_records = []
-            for record in related_records:
+            account_related_raw[key] = list(related_records)
+        account_related_raw["Account"] = [account_record] if account_record else []
+
+        account_alerts, record_alerts_by_id, record_alerts_by_index = _evaluate_alerts_for_account(
+            compiled_alerts,
+            account_record,
+            account_related_raw,
+            warnings,
+        )
+        account_payload["alerts"] = [dict(alert) for alert in account_alerts]
+
+        for obj in configured_objects:
+            key = obj["key"]
+            related_records = account_related_raw.get(key, []) or []
+            display_fields = display_fields_map.get(key, [])
+            payload_records: List[Dict[str, object]] = []
+            for index, record in enumerate(related_records):
                 if not record:
                     continue
-                payload_records.append(
-                    {
-                        "id": record.get("Id"),
-                        "fields": _record_to_field_list(
-                            display_fields,
-                            record,
-                            extra_fields=_get_object_link_fields(key),
-                        ),
-                    }
-                )
+                entry: Dict[str, object] = {
+                    "id": record.get("Id"),
+                    "fields": _record_to_field_list(
+                        display_fields,
+                        record,
+                        extra_fields=_get_object_link_fields(key),
+                    ),
+                }
+                alerts_for_record: List[Dict[str, str]] = []
+                record_id_value = record.get("Id")
+                if record_id_value:
+                    record_alerts = record_alerts_by_id.get(key, {}).get(str(record_id_value), [])
+                    alerts_for_record.extend(record_alerts)
+                alerts_for_record.extend(record_alerts_by_index.get(key, {}).get(index, []))
+                if alerts_for_record:
+                    seen_alerts: Set[str] = set()
+                    deduped_alerts: List[Dict[str, str]] = []
+                    for alert_info in alerts_for_record:
+                        alert_id = alert_info.get("id")
+                        if alert_id and alert_id in seen_alerts:
+                            continue
+                        seen_alerts.add(alert_id)
+                        deduped_alerts.append(dict(alert_info))
+                    if deduped_alerts:
+                        entry["alerts"] = deduped_alerts
+                payload_records.append(entry)
             account_payload["related"][key] = payload_records
         explorer_data["accounts"].append(account_payload)
 
