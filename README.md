@@ -9,6 +9,10 @@ A lightweight Flask application to manage Salesforce org connections via OAuth 2
 - Run SOQL queries against connected orgs directly from the UI.
 - Built-in guide documenting Salesforce and application configuration steps.
 
+## Account Explorer contact point configuration
+
+The Account Explorer allows administrators to inspect related records for an Account, including contact point data. Through the **Set Up** modal you can choose whether **ContactPointPhone** and **ContactPointEmail** records are retrieved via their related `Contact__c` (Contact) links, their `ParentId` (Individual) links, or both. The explorer labels each tree node with the origin used so you can easily distinguish the connection path.
+
 ## Getting started
 
 1. Create and activate a Python 3.10+ virtual environment.

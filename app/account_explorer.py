@@ -38,6 +38,25 @@ _ALERT_OPERATORS: Dict[str, str] = {
 _ALERT_VALUELESS_OPERATORS: Set[str] = {"blank", "not_blank", "null", "not_null"}
 
 
+def _sanitize_contact_point_sources(raw: object) -> Dict[str, Dict[str, bool]]:
+    sanitized: Dict[str, Dict[str, bool]] = {}
+    if not isinstance(raw, dict):
+        return sanitized
+    for object_key, value in raw.items():
+        if object_key not in _CONTACT_POINT_OBJECTS:
+            continue
+        if not isinstance(value, dict):
+            continue
+        entry: Dict[str, bool] = {}
+        for source_key in _CONTACT_POINT_SOURCE_KEYS:
+            raw_value = value.get(source_key)
+            if isinstance(raw_value, bool):
+                entry[source_key] = raw_value
+        if entry:
+            sanitized[object_key] = entry
+    return sanitized
+
+
 def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, object]]:
     sanitized: List[Dict[str, object]] = []
     seen_ids: Set[str] = set()
@@ -105,6 +124,14 @@ _VALID_VIEW_MODES: Set[str] = {"list", "tree"}
 _DEFAULT_VIEW_MODE = "list"
 
 # Definition of the query requirements for each object.
+_CONTACT_POINT_SOURCE_ORDER: List[str] = ["contact", "individual"]
+_CONTACT_POINT_SOURCE_KEYS: Set[str] = set(_CONTACT_POINT_SOURCE_ORDER)
+_DEFAULT_CONTACT_POINT_SOURCES: Dict[str, bool] = {
+    "contact": True,
+    "individual": True,
+}
+
+
 _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "Account": {
         "label": "Account",
@@ -153,15 +180,15 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     },
     "ContactPointPhone": {
         "label": "Contact Point Phone",
-        "required_fields": ["Contact__c"],
+        "required_fields": [],
         "contact_field": "Contact__c",
-        "individual_field": None,
+        "individual_field": "ParentId",
     },
     "ContactPointEmail": {
         "label": "Contact Point Email",
-        "required_fields": ["Contact__c"],
+        "required_fields": [],
         "contact_field": "Contact__c",
-        "individual_field": None,
+        "individual_field": "ParentId",
     },
 }
 
@@ -203,6 +230,7 @@ class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
     objects: List[Dict[str, object]] = field(default_factory=list)
     alerts: List[Dict[str, object]] = field(default_factory=list)
+    contact_point_sources: Dict[str, Dict[str, bool]] = field(default_factory=dict)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
@@ -228,6 +256,10 @@ class ExplorerConfig:
                 if isinstance(item, dict) and item.get("key")
             ],
             "alerts": self.get_alerts(),
+            "contactPointSources": {
+                object_key: self.get_contact_point_sources(object_key)
+                for object_key in _CONTACT_POINT_OBJECTS
+            },
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
         }
@@ -255,6 +287,15 @@ class ExplorerConfig:
 
     def get_alerts(self) -> List[Dict[str, object]]:
         return _sanitize_alert_definitions(self.alerts)
+
+    def get_contact_point_sources(self, object_key: str) -> Dict[str, bool]:
+        sources = dict(_DEFAULT_CONTACT_POINT_SOURCES)
+        raw = self.contact_point_sources.get(object_key)
+        if isinstance(raw, dict):
+            for key in _CONTACT_POINT_SOURCE_KEYS:
+                if key in raw:
+                    sources[key] = bool(raw[key])
+        return sources
 
 
 @dataclass
@@ -381,12 +422,26 @@ def get_session() -> ExplorerSession:
 
 def get_config() -> ExplorerConfig:
     if not CONFIG_FILE.exists():
-        return ExplorerConfig(fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+        return ExplorerConfig(
+            fields={},
+            objects=[],
+            alerts=[],
+            contact_point_sources={},
+            view_mode=_DEFAULT_VIEW_MODE,
+            updated_at=None,
+        )
     with _config_lock:
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return ExplorerConfig(fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+            return ExplorerConfig(
+                fields={},
+                objects=[],
+                alerts=[],
+                contact_point_sources={},
+                view_mode=_DEFAULT_VIEW_MODE,
+                updated_at=None,
+            )
         fields = data.get("fields") if isinstance(data, dict) else {}
         if not isinstance(fields, dict):
             fields = {}
@@ -422,10 +477,15 @@ def get_config() -> ExplorerConfig:
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
         alerts_payload = data.get("alerts") if isinstance(data, dict) else []
         alerts = _sanitize_alert_definitions(alerts_payload if isinstance(alerts_payload, Sequence) else [])
+        contact_point_sources_raw = (
+            data.get("contactPointSources") if isinstance(data, dict) else {}
+        )
+        contact_point_sources = _sanitize_contact_point_sources(contact_point_sources_raw)
         return ExplorerConfig(
             fields=result,
             objects=objects,
             alerts=alerts,
+            contact_point_sources=contact_point_sources,
             view_mode=view_mode,
             updated_at=updated_at,
         )
@@ -440,6 +500,9 @@ def save_config(config: ExplorerConfig) -> None:
             if isinstance(item, dict) and item.get("key")
         ],
         "alerts": config.get_alerts(),
+        "contactPointSources": _sanitize_contact_point_sources(
+            config.contact_point_sources
+        ),
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
     }
@@ -455,6 +518,9 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
     sanitized_alerts: List[Dict[str, object]] = existing.get_alerts()
+    contact_point_sources: Dict[str, Dict[str, bool]] = dict(
+        existing.contact_point_sources
+    )
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
 
     fields_payload = payload.get("fields") if "fields" in payload else None
@@ -497,6 +563,13 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     if isinstance(alerts_payload, Sequence) and not isinstance(alerts_payload, (str, bytes)):
         sanitized_alerts = _sanitize_alert_definitions(alerts_payload)
 
+    if "contactPointSources" in payload:
+        raw_sources = payload.get("contactPointSources")
+        if isinstance(raw_sources, dict):
+            contact_point_sources = _sanitize_contact_point_sources(raw_sources)
+        else:
+            contact_point_sources = dict(existing.contact_point_sources)
+
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -509,6 +582,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
         fields=sanitized_fields,
         objects=sanitized_objects,
         alerts=sanitized_alerts,
+        contact_point_sources=contact_point_sources,
         view_mode=view_mode,
         updated_at=timestamp,
     )
@@ -718,15 +792,79 @@ def _aggregate_individuals_by_account(
     return account_to_individuals
 
 
+def _add_contact_point_source(record: Dict[str, object], source: str) -> None:
+    if source not in _CONTACT_POINT_SOURCE_KEYS:
+        return
+    raw_sources = record.get("__linkSources")
+    existing: Set[str] = set()
+    if isinstance(raw_sources, list):
+        for item in raw_sources:
+            if isinstance(item, str) and item in _CONTACT_POINT_SOURCE_KEYS:
+                existing.add(item)
+    elif isinstance(raw_sources, str) and raw_sources in _CONTACT_POINT_SOURCE_KEYS:
+        existing.add(raw_sources)
+    existing.add(source)
+    if existing:
+        record["__linkSources"] = [
+            value for value in _CONTACT_POINT_SOURCE_ORDER if value in existing
+        ]
+
+
+def _get_contact_point_source_list(record: Dict[str, object]) -> List[str]:
+    raw_sources = record.get("__linkSources")
+    if isinstance(raw_sources, list):
+        result: List[str] = []
+        for item in raw_sources:
+            if isinstance(item, str) and item in _CONTACT_POINT_SOURCE_KEYS and item not in result:
+                result.append(item)
+        return result
+    if isinstance(raw_sources, str) and raw_sources in _CONTACT_POINT_SOURCE_KEYS:
+        return [raw_sources]
+    return []
+
+
+def _get_contact_point_sources(record: Dict[str, object]) -> Set[str]:
+    return set(_get_contact_point_source_list(record))
+
+
+def _store_contact_point_record(
+    records_by_id: MutableMapping[str, Dict[str, object]],
+    record: Dict[str, object],
+    source: str,
+) -> None:
+    if not isinstance(record, dict) or source not in _CONTACT_POINT_SOURCE_KEYS:
+        return
+    record_id = record.get("Id")
+    if not record_id:
+        return
+    record_id_str = str(record_id)
+    if record_id_str in records_by_id:
+        existing = records_by_id[record_id_str]
+        for key, value in record.items():
+            if key == "__linkSources":
+                continue
+            existing[key] = value
+        _add_contact_point_source(existing, source)
+    else:
+        new_record = {key: value for key, value in record.items() if key != "__linkSources"}
+        _add_contact_point_source(new_record, source)
+        records_by_id[record_id_str] = new_record
+
+
 def _aggregate_contact_points(
     contact_points: Sequence[Dict[str, object]],
     contact_field: Optional[str] = None,
     individual_field: Optional[str] = None,
+    active_sources: Optional[Set[str]] = None,
 ) -> Dict[str, MutableMapping[str, List[Dict[str, object]]]]:
     mapping: Dict[str, MutableMapping[str, List[Dict[str, object]]]] = {
         "contact": {},
         "individual": {},
     }
+    allowed_sources = (
+        {source for source in (active_sources or _CONTACT_POINT_SOURCE_KEYS) if source in _CONTACT_POINT_SOURCE_KEYS}
+        or set(_CONTACT_POINT_SOURCE_KEYS)
+    )
     contact_candidates: List[str] = []
     for field in (contact_field, "ContactId", "Contact__c", "ParentId"):
         if isinstance(field, str) and field and field not in contact_candidates:
@@ -736,16 +874,23 @@ def _aggregate_contact_points(
         if isinstance(field, str) and field and field not in individual_candidates:
             individual_candidates.append(field)
     for record in contact_points:
-        for field in contact_candidates:
-            contact_id = record.get(field)
-            if contact_id:
-                mapping["contact"].setdefault(str(contact_id), []).append(record)
-                break
-        for field in individual_candidates:
-            individual_id = record.get(field)
-            if individual_id:
-                mapping["individual"].setdefault(str(individual_id), []).append(record)
-                break
+        if not isinstance(record, dict):
+            continue
+        record_sources = _get_contact_point_sources(record)
+        if not record_sources:
+            record_sources = set(allowed_sources)
+        if "contact" in allowed_sources and "contact" in record_sources:
+            for field in contact_candidates:
+                contact_id = record.get(field)
+                if contact_id:
+                    mapping["contact"].setdefault(str(contact_id), []).append(record)
+                    break
+        if "individual" in allowed_sources and "individual" in record_sources:
+            for field in individual_candidates:
+                individual_id = record.get(field)
+                if individual_id:
+                    mapping["individual"].setdefault(str(individual_id), []).append(record)
+                    break
     return mapping
 
 
@@ -1081,6 +1226,16 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         definition = _OBJECT_DEFINITIONS.get(object_key, {})
         query_fields, display_fields = _build_query_fields(org, object_key, config)
         records_by_id: Dict[str, Dict[str, object]] = {}
+        source_config = config.get_contact_point_sources(object_key)
+        active_sources = {
+            source for source, enabled in source_config.items() if enabled and source in _CONTACT_POINT_SOURCE_KEYS
+        }
+        if not active_sources:
+            results[object_key] = []
+            contact_point_mappings[object_key] = {"contact": {}, "individual": {}}
+            continue
+        individual_enabled = "individual" in active_sources
+        contact_enabled = "contact" in active_sources
         if "individual_field" in definition:
             raw_individual_field = definition.get("individual_field")
         else:
@@ -1100,19 +1255,28 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         except SalesforceError as exc:
             logger.warning("Unable to describe %s: %s", object_key, exc)
             available_contact_point_fields = set()
-        if (
+        if not individual_enabled:
+            individual_field = ""
+        elif (
             individual_field
             and individual_field.lower() != "none"
             and individual_field not in available_contact_point_fields
         ):
             individual_field = ""
-        if (
+        if not contact_enabled:
+            contact_field = ""
+        elif (
             contact_field
             and contact_field.lower() != "none"
             and contact_field not in available_contact_point_fields
         ):
             contact_field = ""
-        if individual_field and individual_field.lower() != "none" and individual_ids:
+        if (
+            individual_enabled
+            and individual_field
+            and individual_field.lower() != "none"
+            and individual_ids
+        ):
             for chunk in _chunk(individual_ids, 100):
                 if object_key in warnings:
                     break
@@ -1121,11 +1285,10 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
-                    record_id = record.get("Id")
-                    if record_id:
-                        records_by_id[str(record_id)] = record
+                    _store_contact_point_record(records_by_id, record, "individual")
         if (
             object_key not in warnings
+            and contact_enabled
             and contact_field
             and contact_field.lower() != "none"
             and contact_ids
@@ -1138,15 +1301,14 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
-                    record_id = record.get("Id")
-                    if record_id:
-                        records_by_id[str(record_id)] = record
+                    _store_contact_point_record(records_by_id, record, "contact")
         records = list(records_by_id.values())
         results[object_key] = records
         contact_point_mappings[object_key] = _aggregate_contact_points(
             records,
             contact_field=contact_field,
             individual_field=individual_field,
+            active_sources=active_sources,
         )
 
     contact_by_account = _map_records_by_field(contacts, "AccountId")
@@ -1243,6 +1405,10 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                         alert_details=field_alerts_for_record,
                     ),
                 }
+                if key in _CONTACT_POINT_OBJECTS:
+                    link_sources = _get_contact_point_source_list(record)
+                    if link_sources:
+                        record_payload["linkSources"] = link_sources
                 if alert_ids:
                     record_payload["alerts"] = alert_ids
                 if record_alerts_for_record:

@@ -3,7 +3,13 @@
   const VIEW_MODES = new Set(["list", "tree"]);
 
   const CONTACT_LINK_FIELDS = ["ContactId", "Contact__c", "Contact", "ParentId"];
-  const INDIVIDUAL_LINK_FIELDS = ["IndividualId", "Individual__c"];
+  const INDIVIDUAL_LINK_FIELDS = ["IndividualId", "Individual__c", "ParentId"];
+  const CONTACT_POINT_OBJECTS = new Set(["ContactPointPhone", "ContactPointEmail"]);
+  const CONTACT_POINT_SOURCE_DEFAULTS = { contact: true, individual: true };
+  const CONTACT_POINT_SOURCE_LABEL_KEYS = {
+    contact: "account_explorer.results.contact_point_sources.contact",
+    individual: "account_explorer.results.contact_point_sources.individual",
+  };
 
   const ALERT_OPERATORS = [
     { value: "equals", labelKey: "account_explorer.setup.alerts.operators.equals", needsValue: true },
@@ -91,6 +97,24 @@
       seen.add(key);
     });
     return normalized;
+  }
+
+  function resolveContactPointSourceConfig(config, objectKey) {
+    const defaults = { ...CONTACT_POINT_SOURCE_DEFAULTS };
+    if (!config || typeof config !== "object") {
+      return defaults;
+    }
+    const entry = config[objectKey];
+    if (!entry || typeof entry !== "object") {
+      return defaults;
+    }
+    if (typeof entry.contact === "boolean") {
+      defaults.contact = entry.contact;
+    }
+    if (typeof entry.individual === "boolean") {
+      defaults.individual = entry.individual;
+    }
+    return defaults;
   }
 
   function getObjectDefinitions() {
@@ -416,6 +440,9 @@
     if (!Array.isArray(configState.alerts)) {
       configState.alerts = [];
     }
+    if (!configState.contactPointSources || typeof configState.contactPointSources !== "object") {
+      configState.contactPointSources = {};
+    }
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
 
     let setupObjectsState = [];
@@ -423,6 +450,7 @@
     let setupAlertsState = [];
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
+    const setupContactPointSourceInputs = new Map();
     const fieldCache = new Map();
 
     function isObjectVisible(key) {
@@ -785,12 +813,26 @@
       return card;
     }
 
-    function buildLinkMap(records, candidates) {
+    function buildLinkMap(records, candidates, options = {}) {
       const map = new Map();
       if (!Array.isArray(records)) {
         return map;
       }
+      const requireSource =
+        options && typeof options.requireSource === "string"
+          ? options.requireSource
+          : null;
       records.forEach((record) => {
+        if (requireSource) {
+          const sources = Array.isArray(record?.linkSources)
+            ? record.linkSources
+                .map((value) => (typeof value === "string" ? value : null))
+                .filter(Boolean)
+            : [];
+          if (!sources.includes(requireSource)) {
+            return;
+          }
+        }
         const value = findFirstFieldValue(record, candidates);
         if (!value) {
           return;
@@ -846,6 +888,30 @@
         meta.className = "account-tree-node__meta";
         meta.textContent = recordId;
         node.appendChild(meta);
+      }
+      if (
+        (objectKey === "ContactPointPhone" || objectKey === "ContactPointEmail") &&
+        Array.isArray(record.linkSources)
+      ) {
+        const tags = document.createElement("div");
+        tags.className = "account-tree-node__tags";
+        record.linkSources.forEach((source) => {
+          if (typeof source !== "string" || !source) {
+            return;
+          }
+          const labelKey = CONTACT_POINT_SOURCE_LABEL_KEYS[source];
+          const text = labelKey ? translateKey(labelKey) : source;
+          if (!text) {
+            return;
+          }
+          const tag = document.createElement("span");
+          tag.className = "account-tree-node__tag";
+          tag.textContent = text;
+          tags.appendChild(tag);
+        });
+        if (tags.childElementCount) {
+          node.appendChild(tags);
+        }
       }
       if (showFields) {
         const fieldsContainer = document.createElement("div");
@@ -930,19 +996,44 @@
       }
       const mapping = forIndividual
         ? [
-            { key: "ContactPointPhone", records: context.contactPointPhonesByIndividual },
-            { key: "ContactPointEmail", records: context.contactPointEmailsByIndividual },
+            {
+              key: "ContactPointPhone",
+              records: context.contactPointPhonesByIndividual,
+              source: "individual",
+            },
+            {
+              key: "ContactPointEmail",
+              records: context.contactPointEmailsByIndividual,
+              source: "individual",
+            },
           ]
         : [
-            { key: "ContactPointPhone", records: context.contactPointPhonesByContact },
-            { key: "ContactPointEmail", records: context.contactPointEmailsByContact },
+            {
+              key: "ContactPointPhone",
+              records: context.contactPointPhonesByContact,
+              source: "contact",
+            },
+            {
+              key: "ContactPointEmail",
+              records: context.contactPointEmailsByContact,
+              source: "contact",
+            },
           ];
       const branches = [];
       mapping.forEach((entry) => {
         if (!context.isObjectVisible(entry.key)) {
           return;
         }
-        const records = entry.records.get(recordId) || [];
+        if (
+          typeof context.isContactPointSourceEnabled === "function" &&
+          !context.isContactPointSourceEnabled(entry.key, entry.source)
+        ) {
+          return;
+        }
+        const records =
+          entry.records && typeof entry.records.get === "function"
+            ? entry.records.get(recordId) || []
+            : [];
         const groupNode = createTreeGroupNode(context.getLabel(entry.key), records.length, {
           objectKey: entry.key,
           variant: "contact-point",
@@ -1186,10 +1277,27 @@
       });
 
       const contactRelationsByContact = buildLinkMap(relations, CONTACT_LINK_FIELDS);
-      const contactPointPhonesByContact = buildLinkMap(phones, CONTACT_LINK_FIELDS);
-      const contactPointEmailsByContact = buildLinkMap(emails, CONTACT_LINK_FIELDS);
-      const contactPointPhonesByIndividual = buildLinkMap(phones, INDIVIDUAL_LINK_FIELDS);
-      const contactPointEmailsByIndividual = buildLinkMap(emails, INDIVIDUAL_LINK_FIELDS);
+      const contactPointSources = new Map();
+      CONTACT_POINT_OBJECTS.forEach((objectKey) => {
+        contactPointSources.set(
+          objectKey,
+          resolveContactPointSourceConfig(configState.contactPointSources, objectKey)
+        );
+      });
+      const phoneSourceConfig = contactPointSources.get("ContactPointPhone");
+      const emailSourceConfig = contactPointSources.get("ContactPointEmail");
+      const contactPointPhonesByContact = phoneSourceConfig?.contact
+        ? buildLinkMap(phones, CONTACT_LINK_FIELDS, { requireSource: "contact" })
+        : new Map();
+      const contactPointEmailsByContact = emailSourceConfig?.contact
+        ? buildLinkMap(emails, CONTACT_LINK_FIELDS, { requireSource: "contact" })
+        : new Map();
+      const contactPointPhonesByIndividual = phoneSourceConfig?.individual
+        ? buildLinkMap(phones, INDIVIDUAL_LINK_FIELDS, { requireSource: "individual" })
+        : new Map();
+      const contactPointEmailsByIndividual = emailSourceConfig?.individual
+        ? buildLinkMap(emails, INDIVIDUAL_LINK_FIELDS, { requireSource: "individual" })
+        : new Map();
 
       const visibleDefinitions = getVisibleObjects().map((definition) => ({
         key: definition.key,
@@ -1205,6 +1313,17 @@
         contactPointEmailsByContact,
         contactPointPhonesByIndividual,
         contactPointEmailsByIndividual,
+        contactPointSources,
+        isContactPointSourceEnabled(objectKey, source) {
+          const entry = contactPointSources.get(objectKey);
+          if (!entry || typeof entry !== "object") {
+            return true;
+          }
+          if (typeof source === "string" && Object.prototype.hasOwnProperty.call(entry, source)) {
+            return Boolean(entry[source]);
+          }
+          return true;
+        },
         visibleDefinitions,
       };
 
@@ -1708,6 +1827,24 @@
       return payload;
     }
 
+    function gatherContactPointSources() {
+      const payload = {};
+      setupContactPointSourceInputs.forEach((inputs, objectKey) => {
+        if (!inputs) {
+          return;
+        }
+        const entry = {};
+        if (inputs.contact) {
+          entry.contact = Boolean(inputs.contact.checked);
+        }
+        if (inputs.individual) {
+          entry.individual = Boolean(inputs.individual.checked);
+        }
+        payload[objectKey] = entry;
+      });
+      return payload;
+    }
+
     function loadFieldsForObject(objectKey) {
       if (!setupOrgSelect || !setupOrgSelect.value) {
         return Promise.reject(new Error("no_org"));
@@ -1848,6 +1985,7 @@
       }
       setupFieldInputs.clear();
       setupFieldDatalists.clear();
+      setupContactPointSourceInputs.clear();
       setupFieldsContainer.innerHTML = "";
       setupObjectsState.forEach((definition, index) => {
         const objectKey = definition.key;
@@ -1898,6 +2036,67 @@
         const datalist = document.createElement("datalist");
         datalist.id = `account-explorer-setup-datalist-${objectKey}`;
         body.appendChild(datalist);
+        if (CONTACT_POINT_OBJECTS.has(objectKey)) {
+          const optionsWrapper = document.createElement("div");
+          optionsWrapper.className = "mt-3";
+          const optionsTitle = document.createElement("div");
+          optionsTitle.className = "text-muted text-uppercase small fw-semibold mb-2";
+          optionsTitle.textContent = translateKey(
+            "account_explorer.setup.contact_points.title"
+          );
+          optionsWrapper.appendChild(optionsTitle);
+          const optionsDescription = document.createElement("p");
+          optionsDescription.className = "small text-muted mb-2";
+          optionsDescription.textContent = translateKey(
+            "account_explorer.setup.contact_points.description"
+          );
+          optionsWrapper.appendChild(optionsDescription);
+          const switchesContainer = document.createElement("div");
+          switchesContainer.className = "d-flex flex-wrap gap-3";
+
+          const contactSwitch = document.createElement("div");
+          contactSwitch.className = "form-check form-switch";
+          const contactInput = document.createElement("input");
+          contactInput.className = "form-check-input";
+          contactInput.type = "checkbox";
+          contactInput.id = `account-explorer-contact-source-${objectKey}-contact`;
+          contactInput.setAttribute("data-object", objectKey);
+          contactInput.setAttribute("data-source", "contact");
+          const contactLabel = document.createElement("label");
+          contactLabel.className = "form-check-label";
+          contactLabel.setAttribute("for", contactInput.id);
+          contactLabel.textContent = translateKey(
+            "account_explorer.setup.contact_points.options.contact"
+          );
+          contactSwitch.appendChild(contactInput);
+          contactSwitch.appendChild(contactLabel);
+          switchesContainer.appendChild(contactSwitch);
+
+          const individualSwitch = document.createElement("div");
+          individualSwitch.className = "form-check form-switch";
+          const individualInput = document.createElement("input");
+          individualInput.className = "form-check-input";
+          individualInput.type = "checkbox";
+          individualInput.id = `account-explorer-contact-source-${objectKey}-individual`;
+          individualInput.setAttribute("data-object", objectKey);
+          individualInput.setAttribute("data-source", "individual");
+          const individualLabel = document.createElement("label");
+          individualLabel.className = "form-check-label";
+          individualLabel.setAttribute("for", individualInput.id);
+          individualLabel.textContent = translateKey(
+            "account_explorer.setup.contact_points.options.individual"
+          );
+          individualSwitch.appendChild(individualInput);
+          individualSwitch.appendChild(individualLabel);
+          switchesContainer.appendChild(individualSwitch);
+
+          optionsWrapper.appendChild(switchesContainer);
+          body.appendChild(optionsWrapper);
+          setupContactPointSourceInputs.set(objectKey, {
+            contact: contactInput,
+            individual: individualInput,
+          });
+        }
         collapse.appendChild(body);
         item.appendChild(collapse);
         setupFieldsContainer.appendChild(item);
@@ -1914,6 +2113,18 @@
         inputs.forEach((input, index) => {
           input.value = values[index] || "";
         });
+      });
+      setupContactPointSourceInputs.forEach((inputs, objectKey) => {
+        const config = resolveContactPointSourceConfig(
+          configState.contactPointSources,
+          objectKey
+        );
+        if (inputs.contact) {
+          inputs.contact.checked = Boolean(config.contact);
+        }
+        if (inputs.individual) {
+          inputs.individual.checked = Boolean(config.individual);
+        }
       });
     }
 
@@ -2318,6 +2529,7 @@
         })),
         viewMode: setupViewMode,
         alerts: gatherSetupAlerts(),
+        contactPointSources: gatherContactPointSources(),
       };
       fetch("/api/account-explorer/config", {
         method: "POST",
@@ -2339,6 +2551,12 @@
           );
           if (!Array.isArray(configState.alerts)) {
             configState.alerts = [];
+          }
+          if (
+            !configState.contactPointSources ||
+            typeof configState.contactPointSources !== "object"
+          ) {
+            configState.contactPointSources = {};
           }
           window.ACCOUNT_EXPLORER_CONFIG = configState;
           window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
