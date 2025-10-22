@@ -22,6 +22,68 @@ MAX_FIELDS_PER_OBJECT = 5
 CONFIG_FILE = DATA_DIR / "account_explorer_config.json"
 RESULTS_DIR = DATA_DIR / "account_explorer_results"
 
+_ALERT_OPERATORS: Dict[str, str] = {
+    "equals": "equals",
+    "equals_ignore_case": "equals_ignore_case",
+    "not_equals": "not_equals",
+    "contains": "contains",
+    "not_contains": "not_contains",
+    "starts_with": "starts_with",
+    "blank": "blank",
+    "not_blank": "not_blank",
+    "null": "null",
+    "not_null": "not_null",
+}
+
+_ALERT_VALUELESS_OPERATORS: Set[str] = {"blank", "not_blank", "null", "not_null"}
+
+
+def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, object]]:
+    sanitized: List[Dict[str, object]] = []
+    seen_ids: Set[str] = set()
+    for alert in raw_alerts or []:
+        if not isinstance(alert, dict):
+            continue
+        alert_id = str(alert.get("id") or uuid.uuid4())
+        if alert_id in seen_ids:
+            continue
+        label = str(alert.get("label") or "").strip()
+        filters_payload = alert.get("filters") if isinstance(alert.get("filters"), list) else []
+        filters: List[Dict[str, object]] = []
+        for item in filters_payload:
+            if not isinstance(item, dict):
+                continue
+            object_key = str(item.get("object") or "").strip()
+            field_name = str(item.get("field") or "").strip()
+            operator = str(item.get("operator") or "").strip()
+            if not object_key or not field_name or operator not in _ALERT_OPERATORS:
+                continue
+            value = item.get("value")
+            if operator not in _ALERT_VALUELESS_OPERATORS:
+                if not isinstance(value, str):
+                    value = str(value) if value is not None else ""
+                value = value.strip()
+                if not value:
+                    continue
+                entry = {
+                    "object": object_key,
+                    "field": field_name,
+                    "operator": operator,
+                    "value": value,
+                }
+            else:
+                entry = {
+                    "object": object_key,
+                    "field": field_name,
+                    "operator": operator,
+                }
+            filters.append(entry)
+        if not filters:
+            continue
+        sanitized.append({"id": alert_id, "label": label or alert_id, "filters": filters})
+        seen_ids.add(alert_id)
+    return sanitized
+
 CONNECTED_OBJECTS: List[Dict[str, str]] = [
     {"key": "BillingProfile__c", "label": "Billing Profile"},
     {"key": "Contact", "label": "Contact"},
@@ -103,6 +165,18 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     },
 }
 
+_DIRECT_OBJECTS: List[str] = [
+    "BillingProfile__c",
+    "Contract",
+    "Contact",
+    "AccountContactRelation",
+    "Case",
+    "Order",
+    "Sale__c",
+]
+
+_CONTACT_POINT_OBJECTS: List[str] = ["ContactPointPhone", "ContactPointEmail"]
+
 _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "Account": ["Name", "Type", "Industry", "BillingCity", "BillingCountry"],
     "BillingProfile__c": ["Name", "OwnerId", "CreatedDate", "LastModifiedDate"],
@@ -128,6 +202,7 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
     objects: List[Dict[str, object]] = field(default_factory=list)
+    alerts: List[Dict[str, object]] = field(default_factory=list)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
@@ -152,6 +227,7 @@ class ExplorerConfig:
                 for item in self.objects
                 if isinstance(item, dict) and item.get("key")
             ],
+            "alerts": self.get_alerts(),
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
         }
@@ -176,6 +252,9 @@ class ExplorerConfig:
                 continue
             configured.append({**definition, "hidden": False})
         return configured
+
+    def get_alerts(self) -> List[Dict[str, object]]:
+        return _sanitize_alert_definitions(self.alerts)
 
 
 @dataclass
@@ -302,12 +381,12 @@ def get_session() -> ExplorerSession:
 
 def get_config() -> ExplorerConfig:
     if not CONFIG_FILE.exists():
-        return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+        return ExplorerConfig(fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
     with _config_lock:
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+            return ExplorerConfig(fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
         fields = data.get("fields") if isinstance(data, dict) else {}
         if not isinstance(fields, dict):
             fields = {}
@@ -341,9 +420,12 @@ def get_config() -> ExplorerConfig:
         if view_mode not in _VALID_VIEW_MODES:
             view_mode = _DEFAULT_VIEW_MODE
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
+        alerts_payload = data.get("alerts") if isinstance(data, dict) else []
+        alerts = _sanitize_alert_definitions(alerts_payload if isinstance(alerts_payload, Sequence) else [])
         return ExplorerConfig(
             fields=result,
             objects=objects,
+            alerts=alerts,
             view_mode=view_mode,
             updated_at=updated_at,
         )
@@ -357,6 +439,7 @@ def save_config(config: ExplorerConfig) -> None:
             for item in config.objects
             if isinstance(item, dict) and item.get("key")
         ],
+        "alerts": config.get_alerts(),
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
     }
@@ -371,6 +454,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     existing = get_config()
     sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
+    sanitized_alerts: List[Dict[str, object]] = existing.get_alerts()
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
 
     fields_payload = payload.get("fields") if "fields" in payload else None
@@ -409,6 +493,10 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
             seen.add(key)
         sanitized_objects = objects
 
+    alerts_payload = payload.get("alerts") if "alerts" in payload else None
+    if isinstance(alerts_payload, Sequence) and not isinstance(alerts_payload, (str, bytes)):
+        sanitized_alerts = _sanitize_alert_definitions(alerts_payload)
+
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -420,6 +508,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     config = ExplorerConfig(
         fields=sanitized_fields,
         objects=sanitized_objects,
+        alerts=sanitized_alerts,
         view_mode=view_mode,
         updated_at=timestamp,
     )
@@ -437,6 +526,8 @@ def get_object_definition(object_key: str) -> Optional[Dict[str, object]]:
 
 def get_object_fields_config() -> Dict[str, List[str]]:
     config = get_config()
+    alerts_config = config.get_alerts()
+    alert_object_keys = _get_alert_object_keys(alerts_config)
     payload: Dict[str, List[str]] = {}
     for key in _OBJECT_DEFINITIONS.keys():
         payload[key] = config.get_fields(key)
@@ -536,6 +627,7 @@ def _record_to_field_list(
     record: Dict[str, object],
     *,
     extra_fields: Optional[Sequence[str]] = None,
+    alert_details: Optional[Dict[str, List[Dict[str, object]]]] = None,
 ) -> List[Dict[str, object]]:
     payload: List[Dict[str, object]] = []
     record = record or {}
@@ -552,6 +644,17 @@ def _record_to_field_list(
         entry: Dict[str, object] = {"name": field, "value": record.get(field)}
         if field in hidden_fields:
             entry["hidden"] = True
+        if alert_details and field in alert_details:
+            details = [detail for detail in alert_details.get(field, []) if isinstance(detail, dict)]
+            if details:
+                entry["alertDetails"] = details
+                alert_ids: List[str] = []
+                for detail in details:
+                    alert_id = detail.get("id")
+                    if isinstance(alert_id, str) and alert_id not in alert_ids:
+                        alert_ids.append(alert_id)
+                if alert_ids:
+                    entry["alerts"] = alert_ids
         payload.append(entry)
     return payload
 
@@ -646,6 +749,263 @@ def _aggregate_contact_points(
     return mapping
 
 
+def _prepare_records_with_keys(
+    object_key: str, records: Sequence[Dict[str, object]]
+) -> List[Tuple[str, Dict[str, object]]]:
+    prepared: List[Tuple[str, Dict[str, object]]] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        record_id = record.get("Id")
+        if record_id:
+            record_key = str(record_id)
+        else:
+            record_key = f"{object_key}:{index}"
+        prepared.append((record_key, record))
+    return prepared
+
+
+def _stringify_alert_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _matches_alert_condition(value: object, operator: str, target: Optional[str]) -> bool:
+    if operator == "equals":
+        if value is None:
+            return False
+        return str(value) == (target or "")
+    if operator == "equals_ignore_case":
+        if value is None:
+            return False
+        return str(value).lower() == (target or "").lower()
+    if operator == "not_equals":
+        if value is None:
+            return (target or "") != ""
+        return str(value) != (target or "")
+    if operator == "contains":
+        if value is None:
+            return False
+        return (target or "") in str(value)
+    if operator == "not_contains":
+        if value is None:
+            return True
+        return (target or "") not in str(value)
+    if operator == "starts_with":
+        if value is None:
+            return False
+        return str(value).startswith(target or "")
+    if operator == "blank":
+        if value is None:
+            return True
+        return str(value).strip() == ""
+    if operator == "not_blank":
+        if value is None:
+            return False
+        return str(value).strip() != ""
+    if operator == "null":
+        return value is None
+    if operator == "not_null":
+        return value is not None
+    return False
+
+
+def _evaluate_alert_filters_for_record(
+    record: Dict[str, object], filters: Sequence[Dict[str, object]]
+) -> Optional[List[Dict[str, object]]]:
+    matched_fields: List[Dict[str, object]] = []
+    for filter_definition in filters:
+        field_name = filter_definition.get("field")
+        operator = filter_definition.get("operator")
+        if not isinstance(field_name, str) or not isinstance(operator, str):
+            return None
+        value = record.get(field_name)
+        target = filter_definition.get("value") if operator not in _ALERT_VALUELESS_OPERATORS else None
+        target_str = target if isinstance(target, str) else (str(target) if target is not None else None)
+        if not _matches_alert_condition(value, operator, target_str):
+            return None
+        matched_fields.append(
+            {
+                "name": field_name,
+                "operator": operator,
+                "filterValue": target_str,
+                "actualValue": _stringify_alert_value(value),
+            }
+        )
+    return matched_fields
+
+
+def _evaluate_alerts_for_account(
+    alerts: Sequence[Dict[str, object]],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+) -> Tuple[
+    List[Dict[str, object]],
+    Dict[str, Dict[str, List[Dict[str, object]]]],
+    Dict[str, Dict[str, Dict[str, List[Dict[str, object]]]]],
+]:
+    triggered_alerts: List[Dict[str, object]] = []
+    record_alert_details: Dict[str, Dict[str, List[Dict[str, object]]]] = {}
+    field_alert_details: Dict[str, Dict[str, Dict[str, List[Dict[str, object]]]]] = {}
+    account_key, account_record = account_pair
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        filters_payload = alert.get("filters")
+        if not isinstance(filters_payload, list) or not filters_payload:
+            continue
+        grouped_filters: Dict[str, List[Dict[str, object]]] = {}
+        for filter_definition in filters_payload:
+            object_key = filter_definition.get("object")
+            if not isinstance(object_key, str) or not object_key:
+                continue
+            grouped_filters.setdefault(object_key, []).append(filter_definition)
+        if not grouped_filters:
+            continue
+        alert_matches: List[Dict[str, object]] = []
+        alert_failed = False
+        for object_key, object_filters in grouped_filters.items():
+            if object_key == "Account":
+                candidate_records = [account_pair]
+            else:
+                candidate_records = records_by_object.get(object_key, [])
+            object_matches: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
+            for record_key, record in candidate_records:
+                matches = _evaluate_alert_filters_for_record(record, object_filters)
+                if matches is not None:
+                    object_matches.append((record_key, record, matches))
+            if not object_matches:
+                alert_failed = True
+                break
+            for record_key, record, matches in object_matches:
+                record_id = record.get("Id") if isinstance(record, dict) else None
+                record_id_str = str(record_id) if record_id else None
+                alert_matches.append(
+                    {
+                        "object": object_key,
+                        "recordId": record_id_str,
+                        "recordKey": record_key,
+                        "fields": matches,
+                    }
+                )
+        if alert_failed or not alert_matches:
+            continue
+        alert_id = str(alert.get("id") or uuid.uuid4())
+        label = str(alert.get("label") or "").strip() or alert_id
+        alert_entry = {
+            "id": alert_id,
+            "label": label,
+            "filters": [dict(item) for item in filters_payload if isinstance(item, dict)],
+            "matches": alert_matches,
+        }
+        triggered_alerts.append(alert_entry)
+        for match in alert_matches:
+            object_key = match.get("object")
+            if not isinstance(object_key, str):
+                continue
+            record_key = match.get("recordKey")
+            if not isinstance(record_key, str) or not record_key:
+                if object_key == "Account":
+                    record_key = account_key
+                else:
+                    candidate_records = records_by_object.get(object_key, [])
+                    record_key = candidate_records[0][0] if candidate_records else account_key
+            record_alert_details.setdefault(object_key, {}).setdefault(record_key, []).append(
+                {
+                    "id": alert_id,
+                    "label": label,
+                    "object": object_key,
+                    "recordId": match.get("recordId"),
+                    "fields": match.get("fields", []),
+                }
+            )
+            field_alert_details.setdefault(object_key, {}).setdefault(record_key, {})
+            for field_match in match.get("fields", []):
+                field_name = field_match.get("name")
+                if not isinstance(field_name, str) or not field_name:
+                    continue
+                field_alert_details[object_key][record_key].setdefault(field_name, []).append(
+                    {
+                        "id": alert_id,
+                        "label": label,
+                        "operator": field_match.get("operator"),
+                        "filterValue": field_match.get("filterValue"),
+                        "actualValue": field_match.get("actualValue"),
+                    }
+                )
+    return triggered_alerts, record_alert_details, field_alert_details
+
+
+def _get_alert_object_keys(alerts: Sequence[Dict[str, object]]) -> Set[str]:
+    object_keys: Set[str] = set()
+    for alert in alerts or []:
+        filters = alert.get("filters") if isinstance(alert, dict) else None
+        if not isinstance(filters, list):
+            continue
+        for filter_definition in filters:
+            object_key = filter_definition.get("object") if isinstance(filter_definition, dict) else None
+            if isinstance(object_key, str) and object_key:
+                object_keys.add(object_key)
+    return object_keys
+
+
+def _get_related_records_for_account(
+    object_key: str,
+    account_id: str,
+    *,
+    results: Dict[str, List[Dict[str, object]]],
+    contact_by_account: MutableMapping[str, List[Dict[str, object]]],
+    individual_by_account: MutableMapping[str, Set[str]],
+    individual_records: Dict[str, Dict[str, object]],
+    contact_point_mappings: Dict[str, Dict[str, MutableMapping[str, List[Dict[str, object]]]]],
+) -> List[Dict[str, object]]:
+    if object_key == "Contact":
+        return list(contact_by_account.get(account_id, []))
+    if object_key in _DIRECT_OBJECTS:
+        definition = _OBJECT_DEFINITIONS.get(object_key, {})
+        filter_field = str(definition.get("filter_field", "AccountId"))
+        return _filter_records_by_field(results.get(object_key, []), filter_field, account_id)
+    if object_key == "Individual":
+        individual_ids_for_account = individual_by_account.get(account_id, set())
+        records = [individual_records.get(individual_id) for individual_id in individual_ids_for_account]
+        return [record for record in records if record]
+    if object_key in _CONTACT_POINT_OBJECTS:
+        individual_ids_for_account = individual_by_account.get(account_id, set())
+        contact_records_for_account = contact_by_account.get(account_id, [])
+        contact_ids_for_account = [
+            str(record.get("Id"))
+            for record in contact_records_for_account
+            if record and record.get("Id")
+        ]
+        mapping = contact_point_mappings.get(object_key, {})
+        individual_mapping = mapping.get("individual", {}) if mapping else {}
+        contact_mapping = mapping.get("contact", {}) if mapping else {}
+        related_records: List[Dict[str, object]] = []
+        for individual_id in individual_ids_for_account:
+            related_records.extend(individual_mapping.get(individual_id, []))
+        for contact_id in contact_ids_for_account:
+            related_records.extend(contact_mapping.get(contact_id, []))
+        if not related_records:
+            return []
+        deduped: List[Dict[str, object]] = []
+        seen_ids: Set[str] = set()
+        for record in related_records:
+            if not isinstance(record, dict):
+                continue
+            record_id = record.get("Id")
+            record_id_str = str(record_id) if record_id else ""
+            if record_id_str and record_id_str in seen_ids:
+                continue
+            if record_id_str:
+                seen_ids.add(record_id_str)
+            deduped.append(record)
+        return deduped
+    return []
+
+
 def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     sanitized_ids = _sanitize_account_ids(account_ids)
     if not sanitized_ids:
@@ -671,16 +1031,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     missing_accounts = [account_id for account_id in sanitized_ids if account_id not in account_records]
 
     # Query objects linked directly to accounts
-    direct_objects = [
-        "BillingProfile__c",
-        "Contract",
-        "Contact",
-        "AccountContactRelation",
-        "Case",
-        "Order",
-        "Sale__c",
-    ]
-    for object_key in direct_objects:
+    for object_key in _DIRECT_OBJECTS:
         definition = _OBJECT_DEFINITIONS[object_key]
         filter_field = definition["filter_field"]
         query_fields, display_fields = _build_query_fields(org, object_key, config)
@@ -721,11 +1072,10 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     results["Individual"] = list(individual_records.values())
 
     # Contact points for individuals and contacts
-    contact_point_objects = ["ContactPointPhone", "ContactPointEmail"]
     contact_point_mappings: Dict[
         str, Dict[str, MutableMapping[str, List[Dict[str, object]]]]
     ] = {}
-    for object_key in contact_point_objects:
+    for object_key in _CONTACT_POINT_OBJECTS:
         definition = _OBJECT_DEFINITIONS.get(object_key, {})
         query_fields, display_fields = _build_query_fields(org, object_key, config)
         records_by_id: Dict[str, Dict[str, object]] = {}
@@ -807,6 +1157,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         "accounts": [],
         "objects": configured_objects,
         "config": {key: config.get_fields(key) for key in _OBJECT_DEFINITIONS.keys()},
+        "alerts": alerts_config,
         "summary": {},
     }
     if warnings:
@@ -817,86 +1168,84 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         summary_counts[obj["key"]] = len(results.get(obj["key"], []))
     explorer_data["summary"] = summary_counts
 
+    configured_keys = {obj["key"] for obj in configured_objects}
     for account_id in sanitized_ids:
-        account_record = account_records.get(account_id)
+        account_record = account_records.get(account_id) or {}
+        required_object_keys = set(configured_keys)
+        required_object_keys.update(alert_object_keys)
+        if "Account" in required_object_keys:
+            required_object_keys.remove("Account")
+        records_by_object: Dict[str, List[Tuple[str, Dict[str, object]]]] = {
+            "Account": [(account_id, account_record)]
+        }
+
+        for object_key in required_object_keys:
+            related_records = _get_related_records_for_account(
+                object_key,
+                account_id,
+                results=results,
+                contact_by_account=contact_by_account,
+                individual_by_account=individual_by_account,
+                individual_records=individual_records,
+                contact_point_mappings=contact_point_mappings,
+            )
+            records_by_object[object_key] = _prepare_records_with_keys(object_key, related_records)
+
+        triggered_alerts, record_alert_details, field_alert_details = _evaluate_alerts_for_account(
+            alerts_config,
+            (account_id, account_record),
+            records_by_object,
+        )
+
+        account_field_alerts = field_alert_details.get("Account", {}).get(account_id, {})
+        account_alert_entries = record_alert_details.get("Account", {}).get(account_id, [])
+
         account_payload = {
             "id": account_id,
             "fields": _record_to_field_list(
                 account_display_fields,
-                account_record or {},
+                account_record,
                 extra_fields=_get_object_link_fields("Account"),
+                alert_details=account_field_alerts,
             ),
             "related": {},
         }
+        if triggered_alerts:
+            account_payload["alerts"] = triggered_alerts
+        if account_alert_entries:
+            account_payload["alertDetails"] = account_alert_entries
+
         for obj in configured_objects:
             key = obj["key"]
-            definition = _OBJECT_DEFINITIONS.get(key, {})
             _, display_fields = _build_query_fields(org, key, config)
-            related_records: List[Dict[str, object]]
-            if key == "Contact":
-                related_records = contact_by_account.get(account_id, [])
-            elif key in (
-                "BillingProfile__c",
-                "Contract",
-                "AccountContactRelation",
-                "Case",
-                "Order",
-                "Sale__c",
-            ):
-                filter_field = str(definition.get("filter_field", "AccountId"))
-                related_records = _filter_records_by_field(results.get(key, []), filter_field, account_id)
-            elif key == "Individual":
-                individual_ids_for_account = individual_by_account.get(account_id, set())
-                related_records = [
-                    individual_records.get(individual_id)
-                    for individual_id in individual_ids_for_account
-                ]
-                related_records = [record for record in related_records if record]
-            elif key in ("ContactPointPhone", "ContactPointEmail"):
-                individual_ids_for_account = individual_by_account.get(account_id, set())
-                contact_records_for_account = contact_by_account.get(account_id, [])
-                contact_ids_for_account = [
-                    str(record.get("Id"))
-                    for record in contact_records_for_account
-                    if record and record.get("Id")
-                ]
-                related_records = []
-                mapping = contact_point_mappings.get(key, {})
-                individual_mapping = mapping.get("individual", {}) if mapping else {}
-                contact_mapping = mapping.get("contact", {}) if mapping else {}
-                for individual_id in individual_ids_for_account:
-                    related_records.extend(individual_mapping.get(individual_id, []))
-                for contact_id in contact_ids_for_account:
-                    related_records.extend(contact_mapping.get(contact_id, []))
-                if related_records:
-                    deduped: List[Dict[str, object]] = []
-                    seen_ids: Set[str] = set()
-                    for record in related_records:
-                        record_id = record.get("Id")
-                        if record_id:
-                            record_id = str(record_id)
-                        if record_id and record_id in seen_ids:
-                            continue
-                        if record_id:
-                            seen_ids.add(record_id)
-                        deduped.append(record)
-                    related_records = deduped
-            else:
-                related_records = []
-            payload_records = []
-            for record in related_records:
+            record_pairs = records_by_object.get(key, [])
+            record_alert_map = record_alert_details.get(key, {})
+            field_alert_map = field_alert_details.get(key, {})
+            payload_records: List[Dict[str, object]] = []
+            for record_key, record in record_pairs:
                 if not record:
                     continue
-                payload_records.append(
-                    {
-                        "id": record.get("Id"),
-                        "fields": _record_to_field_list(
-                            display_fields,
-                            record,
-                            extra_fields=_get_object_link_fields(key),
-                        ),
-                    }
-                )
+                field_alerts_for_record = field_alert_map.get(record_key, {})
+                record_alerts_for_record = record_alert_map.get(record_key, [])
+                alert_ids: List[str] = []
+                for detail in record_alerts_for_record:
+                    alert_id = detail.get("id")
+                    if isinstance(alert_id, str) and alert_id not in alert_ids:
+                        alert_ids.append(alert_id)
+                record_payload: Dict[str, object] = {
+                    "id": record.get("Id"),
+                    "fields": _record_to_field_list(
+                        display_fields,
+                        record,
+                        extra_fields=_get_object_link_fields(key),
+                        alert_details=field_alerts_for_record,
+                    ),
+                }
+                if alert_ids:
+                    record_payload["alerts"] = alert_ids
+                if record_alerts_for_record:
+                    record_payload["alertDetails"] = record_alerts_for_record
+                payload_records.append(record_payload)
             account_payload["related"][key] = payload_records
         explorer_data["accounts"].append(account_payload)
 
