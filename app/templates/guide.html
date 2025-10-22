@@ -40,6 +40,18 @@
       {% endfor %}
     </ol>
 
+    {% if sections.get('account_alerts') %}
+      <h5 id="account-alerts">{{ sections['account_alerts']['title'] }}</h5>
+      {% if sections['account_alerts'].get('intro') %}
+        <p class="text-muted">{{ sections['account_alerts']['intro']|safe }}</p>
+      {% endif %}
+      <ol>
+        {% for step in sections['account_alerts']['steps'] %}
+          <li>{{ step|safe }}</li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+
     {% if sections.get('advanced') %}
       <h5>{{ sections['advanced']['title'] }}</h5>
       <ol>

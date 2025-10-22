@@ -5,6 +5,29 @@
   const CONTACT_LINK_FIELDS = ["ContactId", "Contact__c", "Contact", "ParentId"];
   const INDIVIDUAL_LINK_FIELDS = ["IndividualId", "Individual__c"];
 
+  const ALERT_OPERATORS = [
+    { value: "equals", labelKey: "account_explorer.setup.alerts.operators.equals", needsValue: true },
+    {
+      value: "equals_ignore_case",
+      labelKey: "account_explorer.setup.alerts.operators.equals_ignore_case",
+      needsValue: true,
+    },
+    { value: "not_equals", labelKey: "account_explorer.setup.alerts.operators.not_equals", needsValue: true },
+    { value: "contains", labelKey: "account_explorer.setup.alerts.operators.contains", needsValue: true },
+    {
+      value: "not_contains",
+      labelKey: "account_explorer.setup.alerts.operators.not_contains",
+      needsValue: true,
+    },
+    { value: "starts_with", labelKey: "account_explorer.setup.alerts.operators.starts_with", needsValue: true },
+    { value: "blank", labelKey: "account_explorer.setup.alerts.operators.blank", needsValue: false },
+    { value: "not_blank", labelKey: "account_explorer.setup.alerts.operators.not_blank", needsValue: false },
+    { value: "null", labelKey: "account_explorer.setup.alerts.operators.null", needsValue: false },
+    { value: "not_null", labelKey: "account_explorer.setup.alerts.operators.not_null", needsValue: false },
+  ];
+
+  const ALERT_OPERATOR_LOOKUP = new Map(ALERT_OPERATORS.map((operator) => [operator.value, operator]));
+
   function translateKey(key, params = {}) {
     if (typeof translate === "function") {
       const normalizedKey =
@@ -134,6 +157,184 @@
     return translateKey("account_explorer.results.no_id");
   }
 
+  function generateAlertId(prefix = "alert") {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+  }
+
+  function normalizeOperator(value) {
+    if (ALERT_OPERATOR_LOOKUP.has(value)) {
+      return value;
+    }
+    return ALERT_OPERATORS[0]?.value || "equals";
+  }
+
+  function operatorRequiresValue(operator) {
+    const definition = ALERT_OPERATOR_LOOKUP.get(operator);
+    if (!definition) {
+      return true;
+    }
+    return Boolean(definition.needsValue);
+  }
+
+  function createAlertFilter(existing) {
+    const filter = existing || {};
+    return {
+      id: generateAlertId("filter"),
+      object: typeof filter.object === "string" ? filter.object : "",
+      field: typeof filter.field === "string" ? filter.field : "",
+      operator: normalizeOperator(filter.operator),
+      value:
+        typeof filter.value === "string"
+          ? filter.value
+          : filter.value !== undefined && filter.value !== null
+          ? String(filter.value)
+          : "",
+    };
+  }
+
+  function cloneAlertState(alert) {
+    const filters = Array.isArray(alert?.filters)
+      ? alert.filters.map((filter) => createAlertFilter(filter))
+      : [createAlertFilter()];
+    if (!filters.length) {
+      filters.push(createAlertFilter());
+    }
+    return {
+      id: typeof alert?.id === "string" && alert.id ? alert.id : generateAlertId(),
+      label: typeof alert?.label === "string" ? alert.label : "",
+      filters,
+    };
+  }
+
+  function normalizeRecordAlertDetails(details, fallbackAlerts) {
+    if (Array.isArray(details) && details.length) {
+      return details;
+    }
+    if (!Array.isArray(fallbackAlerts)) {
+      return [];
+    }
+    const normalized = [];
+    fallbackAlerts.forEach((alert) => {
+      if (!alert || typeof alert !== "object") {
+        return;
+      }
+      const matches = Array.isArray(alert.matches) ? alert.matches : [];
+      matches.forEach((match) => {
+        if (!match || typeof match !== "object") {
+          return;
+        }
+        normalized.push({
+          id: alert.id,
+          label: alert.label,
+          object: match.object,
+          recordId: match.recordId,
+          fields: Array.isArray(match.fields) ? match.fields : [],
+        });
+      });
+    });
+    return normalized;
+  }
+
+  function getAlertOperatorLabel(operator) {
+    const key = `account_explorer.setup.alerts.operators.${operator}`;
+    const translated = translateKey(key);
+    return translated !== key ? translated : operator;
+  }
+
+  function formatFieldCondition(field) {
+    if (!field || typeof field !== "object") {
+      return "";
+    }
+    const parts = [];
+    if (field.name) {
+      parts.push(field.name);
+    }
+    parts.push(getAlertOperatorLabel(field.operator));
+    if (field.filterValue) {
+      parts.push(field.filterValue);
+    }
+    if (field.actualValue) {
+      parts.push(`[${field.actualValue}]`);
+    }
+    return parts.filter(Boolean).join(" ");
+  }
+
+  function formatRecordAlertDetails(details) {
+    if (!Array.isArray(details) || !details.length) {
+      return "";
+    }
+    const lines = [];
+    details.forEach((detail) => {
+      if (!detail || typeof detail !== "object") {
+        return;
+      }
+      const label = detail.label || detail.id || "";
+      const objectLabel = detail.object ? getObjectLabel(detail.object) : "";
+      const recordPart = detail.recordId ? ` ${detail.recordId}` : "";
+      const fieldDescriptions = Array.isArray(detail.fields)
+        ? detail.fields.map((field) => formatFieldCondition(field)).filter(Boolean)
+        : [];
+      let line = label || "";
+      const context = `${objectLabel}${recordPart}`.trim();
+      if (context) {
+        line = line ? `${line} — ${context}` : context;
+      }
+      if (fieldDescriptions.length) {
+        const description = fieldDescriptions.join("; ");
+        line = line ? `${line}: ${description}` : description;
+      }
+      if (line) {
+        lines.push(line);
+      }
+    });
+    return lines.join("\n");
+  }
+
+  function formatFieldAlertDetails(details, { objectKey, fieldName } = {}) {
+    if (!Array.isArray(details) || !details.length) {
+      return "";
+    }
+    const objectLabel = objectKey ? getObjectLabel(objectKey) : "";
+    const lines = [];
+    details.forEach((detail) => {
+      if (!detail || typeof detail !== "object") {
+        return;
+      }
+      const label = detail.label || detail.id || "";
+      const operatorLabel = getAlertOperatorLabel(detail.operator);
+      const contextParts = [];
+      if (objectLabel) {
+        contextParts.push(objectLabel);
+      }
+      if (fieldName) {
+        contextParts.push(fieldName);
+      }
+      const context = contextParts.join(".");
+      const valueParts = [operatorLabel];
+      if (detail.filterValue) {
+        valueParts.push(detail.filterValue);
+      }
+      if (detail.actualValue) {
+        valueParts.push(`[${detail.actualValue}]`);
+      }
+      const valueText = valueParts.filter(Boolean).join(" ");
+      let line = label || "";
+      if (context) {
+        line = line ? `${line} — ${context}` : context;
+      }
+      if (valueText) {
+        line = line ? `${line}: ${valueText}` : valueText;
+      }
+      if (line) {
+        lines.push(line);
+      }
+    });
+    return lines.join("\n");
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("account-explorer-file");
     const textInput = document.getElementById("account-explorer-text");
@@ -174,6 +375,8 @@
     const setupViewInputs = Array.from(
       document.querySelectorAll('input[name="account-explorer-setup-view"]')
     );
+    const setupAlertList = document.getElementById("account-explorer-setup-alert-list");
+    const setupAlertAddButton = document.getElementById("account-explorer-setup-alert-add");
 
     if (!parseButton || !clearButton || !previewList || !orgSelect) {
       return;
@@ -190,14 +393,18 @@
     let configState =
       typeof window.ACCOUNT_EXPLORER_CONFIG === "object" && window.ACCOUNT_EXPLORER_CONFIG
         ? { ...window.ACCOUNT_EXPLORER_CONFIG }
-        : { fields: {}, objects: [], viewMode: DEFAULT_VIEW_MODE };
+        : { fields: {}, objects: [], alerts: [], viewMode: DEFAULT_VIEW_MODE };
     if (!VIEW_MODES.has(configState.viewMode)) {
       configState.viewMode = DEFAULT_VIEW_MODE;
+    }
+    if (!Array.isArray(configState.alerts)) {
+      configState.alerts = [];
     }
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
 
     let setupObjectsState = [];
     let setupViewMode = currentViewMode;
+    let setupAlertsState = [];
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
     const fieldCache = new Map();
@@ -210,10 +417,13 @@
       return !definition.hidden;
     }
 
-    function getObjectLabel(key) {
-      const definition = objectDefinitions.find((item) => item.key === key);
-      return definition ? definition.label : key;
+  function getObjectLabel(key) {
+    if (key === "Account") {
+      return translateKey("account_explorer.results.account_label");
     }
+    const definition = objectDefinitions.find((item) => item.key === key);
+    return definition ? definition.label : key;
+  }
 
     function getVisibleObjects() {
       return objectDefinitions.filter((item) => !item.hidden);
@@ -333,6 +543,24 @@
       }
     }
 
+    function populateDatalistElement(datalist, fields) {
+      if (!datalist) {
+        return;
+      }
+      datalist.innerHTML = "";
+      (fields || []).forEach((field) => {
+        if (!field) {
+          return;
+        }
+        const option = document.createElement("option");
+        option.value = field.name || "";
+        if (field.label) {
+          option.label = `${field.label} (${field.name})`;
+        }
+        datalist.appendChild(option);
+      });
+    }
+
     function renderMissingAccounts(missing) {
       if (!missingEl) {
         return;
@@ -361,7 +589,7 @@
       return account.id || "";
     }
 
-    function renderFieldList(container, fields) {
+    function renderFieldList(container, fields, { objectKey } = {}) {
       container.innerHTML = "";
       const visibleFields = Array.isArray(fields)
         ? fields.filter((field) => field && !field.hidden)
@@ -380,12 +608,27 @@
         const dd = document.createElement("dd");
         dd.className = "col-sm-8 col-lg-9 mb-1";
         dd.textContent = formatValue(field.value);
+        const fieldAlertDetails = Array.isArray(field.alertDetails)
+          ? field.alertDetails
+          : [];
+        if (fieldAlertDetails.length) {
+          const tooltip = formatFieldAlertDetails(fieldAlertDetails, {
+            objectKey,
+            fieldName: field.name,
+          });
+          if (tooltip) {
+            dt.title = tooltip;
+            dd.title = tooltip;
+          }
+          dt.classList.add("account-alert-text", "text-danger");
+          dd.classList.add("account-alert-text", "text-danger");
+        }
         container.appendChild(dt);
         container.appendChild(dd);
       });
     }
 
-    function renderTreeFieldList(container, fields) {
+    function renderTreeFieldList(container, fields, { objectKey } = {}) {
       container.innerHTML = "";
       const visibleFields = Array.isArray(fields)
         ? fields.filter((field) => field && !field.hidden)
@@ -406,6 +649,21 @@
         const valueEl = document.createElement("div");
         valueEl.className = "account-tree-node__field-value";
         valueEl.textContent = formatValue(field.value);
+        const fieldAlertDetails = Array.isArray(field.alertDetails)
+          ? field.alertDetails
+          : [];
+        if (fieldAlertDetails.length) {
+          const tooltip = formatFieldAlertDetails(fieldAlertDetails, {
+            objectKey,
+            fieldName: field.name,
+          });
+          if (tooltip) {
+            row.title = tooltip;
+          }
+          row.classList.add("account-alert-field");
+          nameEl.classList.add("account-alert-text", "text-danger");
+          valueEl.classList.add("account-alert-text", "text-danger");
+        }
         row.appendChild(nameEl);
         row.appendChild(valueEl);
         container.appendChild(row);
@@ -460,7 +718,18 @@
             card.appendChild(badge);
             const dl = document.createElement("dl");
             dl.className = "row mb-0 small";
-            renderFieldList(dl, record.fields || []);
+            renderFieldList(dl, record.fields || [], { objectKey: key });
+            const recordAlertDetails = Array.isArray(record.alertDetails)
+              ? record.alertDetails
+              : [];
+            if (recordAlertDetails.length) {
+              const tooltip = formatRecordAlertDetails(recordAlertDetails);
+              if (tooltip) {
+                card.title = tooltip;
+              }
+              card.classList.add("account-alert-card");
+              badge.classList.add("bg-danger-subtle", "text-danger");
+            }
             card.appendChild(dl);
             section.appendChild(card);
           });
@@ -479,8 +748,9 @@
       title.textContent = getRecordDisplayName(record, objectKey);
       header.appendChild(title);
       const recordId = getRecordId(record);
+      let badge = null;
       if (recordId) {
-        const badge = document.createElement("span");
+        badge = document.createElement("span");
         badge.className = "badge bg-light text-secondary";
         badge.textContent = recordId;
         header.appendChild(badge);
@@ -488,7 +758,21 @@
       card.appendChild(header);
       const dl = document.createElement("dl");
       dl.className = "row mb-0 small";
-      renderFieldList(dl, record.fields || []);
+      renderFieldList(dl, record.fields || [], { objectKey });
+      const recordAlertDetails = Array.isArray(record.alertDetails)
+        ? record.alertDetails
+        : [];
+      if (recordAlertDetails.length) {
+        const tooltip = formatRecordAlertDetails(recordAlertDetails);
+        if (tooltip) {
+          card.title = tooltip;
+        }
+        card.classList.add("account-alert-card");
+        title.classList.add("account-alert-text", "text-danger");
+        if (badge) {
+          badge.classList.add("bg-danger-subtle", "text-danger");
+        }
+      }
       card.appendChild(dl);
       return card;
     }
@@ -558,8 +842,19 @@
       if (showFields) {
         const fieldsContainer = document.createElement("div");
         fieldsContainer.className = "account-tree-node__fields";
-        renderTreeFieldList(fieldsContainer, record.fields || []);
+        renderTreeFieldList(fieldsContainer, record.fields || [], { objectKey });
         node.appendChild(fieldsContainer);
+      }
+      const recordAlertDetails = Array.isArray(record.alertDetails)
+        ? record.alertDetails
+        : [];
+      if (recordAlertDetails.length) {
+        const tooltip = formatRecordAlertDetails(recordAlertDetails);
+        if (tooltip) {
+          node.title = tooltip;
+        }
+        node.classList.add("account-tree-node--alert");
+        title.classList.add("account-alert-text", "text-danger");
       }
       return node;
     }
@@ -778,6 +1073,18 @@
         meta.className = "account-tree-header__meta text-muted";
         meta.textContent = account.id;
         header.appendChild(meta);
+      }
+      const accountAlertDetails = normalizeRecordAlertDetails(
+        Array.isArray(account.alertDetails) ? account.alertDetails : [],
+        Array.isArray(account.alerts) ? account.alerts : []
+      );
+      if (accountAlertDetails.length) {
+        const tooltip = formatRecordAlertDetails(accountAlertDetails);
+        if (tooltip) {
+          header.title = tooltip;
+        }
+        header.classList.add("account-alert-card");
+        title.classList.add("account-alert-text", "text-danger");
       }
       return header;
     }
@@ -1034,12 +1341,30 @@
       if (!account) {
         accountDetails.classList.add("d-none");
         accountEmpty.classList.remove("d-none");
+        if (accountHeading) {
+          accountHeading.removeAttribute("title");
+          accountHeading.classList.remove("account-alert-text", "text-danger");
+        }
         return;
       }
       accountEmpty.classList.add("d-none");
       accountDetails.classList.remove("d-none");
       accountHeading.textContent = getAccountDisplayName(account) || account.id;
-      renderFieldList(accountFields, account.fields || []);
+      const accountAlertDetails = normalizeRecordAlertDetails(
+        Array.isArray(account.alertDetails) ? account.alertDetails : [],
+        Array.isArray(account.alerts) ? account.alerts : []
+      );
+      if (accountAlertDetails.length) {
+        const tooltip = formatRecordAlertDetails(accountAlertDetails);
+        if (tooltip) {
+          accountHeading.title = tooltip;
+        }
+        accountHeading.classList.add("account-alert-text", "text-danger");
+      } else {
+        accountHeading.removeAttribute("title");
+        accountHeading.classList.remove("account-alert-text", "text-danger");
+      }
+      renderFieldList(accountFields, account.fields || [], { objectKey: "Account" });
       renderRelatedSection(accountRelated, account.related || {});
     }
 
@@ -1129,6 +1454,18 @@
         subtitle.textContent = account.id;
         button.appendChild(title);
         button.appendChild(subtitle);
+        const accountAlertDetails = normalizeRecordAlertDetails(
+          Array.isArray(account.alertDetails) ? account.alertDetails : [],
+          Array.isArray(account.alerts) ? account.alerts : []
+        );
+        if (accountAlertDetails.length) {
+          const tooltip = formatRecordAlertDetails(accountAlertDetails);
+          if (tooltip) {
+            button.title = tooltip;
+          }
+          button.classList.add("account-alert-item");
+          title.classList.add("account-alert-text", "text-danger");
+        }
         button.addEventListener("click", () => {
           renderAccount(account.id);
         });
@@ -1363,17 +1700,15 @@
       return payload;
     }
 
-    function ensureObjectFieldsLoaded(objectKey) {
+    function loadFieldsForObject(objectKey) {
       if (!setupOrgSelect || !setupOrgSelect.value) {
-        showToast(translateKey("frontend.account_explorer.no_org"), "warning");
-        return;
+        return Promise.reject(new Error("no_org"));
       }
       const cacheKey = `${setupOrgSelect.value}:${objectKey}`;
       if (fieldCache.has(cacheKey)) {
-        fillDatalist(objectKey, fieldCache.get(cacheKey));
-        return;
+        return Promise.resolve(fieldCache.get(cacheKey));
       }
-      fetch(
+      return fetch(
         `/api/account-explorer/fields?org_id=${encodeURIComponent(
           setupOrgSelect.value
         )}&object=${encodeURIComponent(objectKey)}`
@@ -1389,10 +1724,21 @@
           }
           const fields = Array.isArray(data?.fields) ? data.fields : [];
           fieldCache.set(cacheKey, fields);
+          return fields;
+        });
+    }
+
+    function ensureObjectFieldsLoaded(objectKey) {
+      loadFieldsForObject(objectKey)
+        .then((fields) => {
           fillDatalist(objectKey, fields);
         })
-        .catch(() => {
-          showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+        .catch((error) => {
+          if (error instanceof Error && error.message === "no_org") {
+            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
+          } else {
+            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+          }
         });
     }
 
@@ -1401,15 +1747,7 @@
       if (!datalist) {
         return;
       }
-      datalist.innerHTML = "";
-      fields.forEach((field) => {
-        const option = document.createElement("option");
-        option.value = field.name || "";
-        if (field.label) {
-          option.label = `${field.label} (${field.name})`;
-        }
-        datalist.appendChild(option);
-      });
+      populateDatalistElement(datalist, fields);
     }
 
     function renderSetupObjectList() {
@@ -1571,12 +1909,387 @@
       });
     }
 
+    function findAlertById(alertId) {
+      return setupAlertsState.find((entry) => entry && entry.id === alertId) || null;
+    }
+
+    function findAlertFilter(alert, filterId) {
+      if (!alert || !Array.isArray(alert.filters)) {
+        return null;
+      }
+      return alert.filters.find((filter) => filter && filter.id === filterId) || null;
+    }
+
+    function updateAlertFilterValueState(alertId, filterId) {
+      if (!setupAlertList) {
+        return;
+      }
+      const selector = `input[data-role="alert-value"][data-alert-id="${alertId}"][data-filter-id="${filterId}"]`;
+      const input = setupAlertList.querySelector(selector);
+      const alert = findAlertById(alertId);
+      const filter = findAlertFilter(alert, filterId);
+      if (!input || !filter) {
+        return;
+      }
+      const needsValue = operatorRequiresValue(filter.operator);
+      input.disabled = !needsValue;
+      if (!needsValue) {
+        input.value = "";
+        filter.value = "";
+      }
+    }
+
+    function loadAlertFieldSuggestions(alertId, filterId) {
+      const alert = findAlertById(alertId);
+      const filter = findAlertFilter(alert, filterId);
+      if (!filter || !filter.object) {
+        return;
+      }
+      loadFieldsForObject(filter.object)
+        .then((fields) => {
+          const datalistId = `account-explorer-alert-datalist-${alertId}-${filterId}`;
+          const datalist = document.getElementById(datalistId);
+          populateDatalistElement(datalist, fields);
+        })
+        .catch((error) => {
+          if (error instanceof Error && error.message === "no_org") {
+            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
+          } else {
+            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+          }
+        });
+    }
+
+    function renderSetupAlerts() {
+      if (!setupAlertList) {
+        return;
+      }
+      setupAlertList.innerHTML = "";
+      if (!setupAlertsState.length) {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey("account_explorer.setup.alerts.empty");
+        setupAlertList.appendChild(empty);
+        return;
+      }
+      const alertObjects = [
+        { key: "Account", label: translateKey("account_explorer.results.account_label") },
+        ...objectDefinitions,
+      ];
+      setupAlertsState.forEach((alert) => {
+        const card = document.createElement("div");
+        card.className = "border rounded p-3";
+        card.dataset.alertId = alert.id;
+
+        const header = document.createElement("div");
+        header.className = "d-flex align-items-center justify-content-between gap-2 mb-3";
+        const labelWrapper = document.createElement("div");
+        labelWrapper.className = "flex-grow-1";
+        const labelId = `account-explorer-alert-label-${alert.id}`;
+        const labelEl = document.createElement("label");
+        labelEl.className = "form-label small mb-1";
+        labelEl.setAttribute("for", labelId);
+        labelEl.textContent = translateKey("account_explorer.setup.alerts.label");
+        const labelInput = document.createElement("input");
+        labelInput.type = "text";
+        labelInput.className = "form-control form-control-sm";
+        labelInput.id = labelId;
+        labelInput.value = alert.label || "";
+        labelInput.dataset.alertId = alert.id;
+        labelInput.dataset.role = "alert-label";
+        labelWrapper.appendChild(labelEl);
+        labelWrapper.appendChild(labelInput);
+        header.appendChild(labelWrapper);
+
+        const removeAlertButton = document.createElement("button");
+        removeAlertButton.type = "button";
+        removeAlertButton.className = "btn btn-outline-danger btn-sm";
+        removeAlertButton.dataset.action = "delete-alert";
+        removeAlertButton.dataset.alertId = alert.id;
+        removeAlertButton.textContent = translateKey("account_explorer.setup.alerts.remove_alert");
+        header.appendChild(removeAlertButton);
+        card.appendChild(header);
+
+        const filtersContainer = document.createElement("div");
+        filtersContainer.className = "d-grid gap-2";
+
+        alert.filters.forEach((filter) => {
+          const row = document.createElement("div");
+          row.className = "row g-2 align-items-end";
+          row.dataset.filterId = filter.id;
+
+          const objectCol = document.createElement("div");
+          objectCol.className = "col-md-3";
+          const objectLabel = document.createElement("label");
+          objectLabel.className = "form-label small";
+          const objectSelectId = `account-explorer-alert-object-${alert.id}-${filter.id}`;
+          objectLabel.setAttribute("for", objectSelectId);
+          objectLabel.textContent = translateKey("account_explorer.setup.alerts.object");
+          const objectSelect = document.createElement("select");
+          objectSelect.className = "form-select form-select-sm";
+          objectSelect.id = objectSelectId;
+          objectSelect.dataset.alertId = alert.id;
+          objectSelect.dataset.filterId = filter.id;
+          objectSelect.dataset.role = "alert-object";
+          const objectPlaceholder = document.createElement("option");
+          objectPlaceholder.value = "";
+          objectPlaceholder.textContent = translateKey(
+            "account_explorer.setup.alerts.object_placeholder"
+          );
+          objectSelect.appendChild(objectPlaceholder);
+          alertObjects.forEach((definition) => {
+            if (!definition) {
+              return;
+            }
+            const option = document.createElement("option");
+            option.value = definition.key;
+            option.textContent = definition.label;
+            objectSelect.appendChild(option);
+          });
+          objectSelect.value = filter.object || "";
+          objectCol.appendChild(objectLabel);
+          objectCol.appendChild(objectSelect);
+          row.appendChild(objectCol);
+
+          const fieldCol = document.createElement("div");
+          fieldCol.className = "col-md-3";
+          const fieldLabel = document.createElement("label");
+          fieldLabel.className = "form-label small";
+          const fieldInputId = `account-explorer-alert-field-${alert.id}-${filter.id}`;
+          fieldLabel.setAttribute("for", fieldInputId);
+          fieldLabel.textContent = translateKey("account_explorer.setup.alerts.field");
+          const fieldInput = document.createElement("input");
+          fieldInput.type = "text";
+          fieldInput.className = "form-control form-control-sm";
+          fieldInput.id = fieldInputId;
+          fieldInput.value = filter.field || "";
+          fieldInput.dataset.alertId = alert.id;
+          fieldInput.dataset.filterId = filter.id;
+          fieldInput.dataset.role = "alert-field";
+          const datalistId = `account-explorer-alert-datalist-${alert.id}-${filter.id}`;
+          fieldInput.setAttribute("list", datalistId);
+          fieldInput.addEventListener("focus", () => loadAlertFieldSuggestions(alert.id, filter.id));
+          const fieldDatalist = document.createElement("datalist");
+          fieldDatalist.id = datalistId;
+          fieldCol.appendChild(fieldLabel);
+          fieldCol.appendChild(fieldInput);
+          fieldCol.appendChild(fieldDatalist);
+          row.appendChild(fieldCol);
+
+          const operatorCol = document.createElement("div");
+          operatorCol.className = "col-md-3 col-sm-6";
+          const operatorLabel = document.createElement("label");
+          operatorLabel.className = "form-label small";
+          const operatorSelectId = `account-explorer-alert-operator-${alert.id}-${filter.id}`;
+          operatorLabel.setAttribute("for", operatorSelectId);
+          operatorLabel.textContent = translateKey("account_explorer.setup.alerts.operator");
+          const operatorSelect = document.createElement("select");
+          operatorSelect.className = "form-select form-select-sm";
+          operatorSelect.id = operatorSelectId;
+          operatorSelect.dataset.alertId = alert.id;
+          operatorSelect.dataset.filterId = filter.id;
+          operatorSelect.dataset.role = "alert-operator";
+          ALERT_OPERATORS.forEach((operator) => {
+            const option = document.createElement("option");
+            option.value = operator.value;
+            option.textContent = translateKey(operator.labelKey);
+            operatorSelect.appendChild(option);
+          });
+          operatorSelect.value = normalizeOperator(filter.operator);
+          operatorCol.appendChild(operatorLabel);
+          operatorCol.appendChild(operatorSelect);
+          row.appendChild(operatorCol);
+
+          const valueCol = document.createElement("div");
+          valueCol.className = "col-md-3 col-sm-6";
+          const valueLabel = document.createElement("label");
+          valueLabel.className = "form-label small";
+          const valueInputId = `account-explorer-alert-value-${alert.id}-${filter.id}`;
+          valueLabel.setAttribute("for", valueInputId);
+          valueLabel.textContent = translateKey("account_explorer.setup.alerts.value");
+          const valueInput = document.createElement("input");
+          valueInput.type = "text";
+          valueInput.className = "form-control form-control-sm";
+          valueInput.id = valueInputId;
+          valueInput.value = filter.value || "";
+          valueInput.placeholder = translateKey("account_explorer.setup.alerts.value_placeholder");
+          valueInput.dataset.alertId = alert.id;
+          valueInput.dataset.filterId = filter.id;
+          valueInput.dataset.role = "alert-value";
+          valueCol.appendChild(valueLabel);
+          valueCol.appendChild(valueInput);
+          row.appendChild(valueCol);
+
+          const removeCol = document.createElement("div");
+          removeCol.className = "col-md-3 col-sm-12";
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "btn btn-outline-danger btn-sm w-100";
+          removeButton.dataset.action = "delete-filter";
+          removeButton.dataset.alertId = alert.id;
+          removeButton.dataset.filterId = filter.id;
+          removeButton.textContent = translateKey("account_explorer.setup.alerts.remove_filter");
+          removeCol.appendChild(removeButton);
+          row.appendChild(removeCol);
+
+          filtersContainer.appendChild(row);
+          updateAlertFilterValueState(alert.id, filter.id);
+        });
+
+        const addFilterWrapper = document.createElement("div");
+        addFilterWrapper.className = "mt-2";
+        const addFilterButton = document.createElement("button");
+        addFilterButton.type = "button";
+        addFilterButton.className = "btn btn-outline-primary btn-sm";
+        addFilterButton.dataset.action = "add-filter";
+        addFilterButton.dataset.alertId = alert.id;
+        addFilterButton.textContent = translateKey("account_explorer.setup.alerts.add_filter");
+        addFilterWrapper.appendChild(addFilterButton);
+
+        card.appendChild(filtersContainer);
+        card.appendChild(addFilterWrapper);
+        setupAlertList.appendChild(card);
+      });
+    }
+
+    function gatherSetupAlerts() {
+      const alerts = [];
+      const seen = new Set();
+      setupAlertsState.forEach((alert) => {
+        if (!alert || typeof alert !== "object") {
+          return;
+        }
+        const label = (alert.label || "").trim();
+        const alertId = typeof alert.id === "string" && alert.id ? alert.id : generateAlertId();
+        if (seen.has(alertId)) {
+          return;
+        }
+        const filters = [];
+        (alert.filters || []).forEach((filter) => {
+          if (!filter || typeof filter !== "object") {
+            return;
+          }
+          const objectKey = (filter.object || "").trim();
+          const fieldName = (filter.field || "").trim();
+          const operator = normalizeOperator(filter.operator);
+          if (!objectKey || !fieldName || !operator) {
+            return;
+          }
+          const definition = ALERT_OPERATOR_LOOKUP.get(operator);
+          const needsValue = definition ? Boolean(definition.needsValue) : true;
+          const value = (filter.value || "").trim();
+          if (needsValue && !value) {
+            return;
+          }
+          const entry = { object: objectKey, field: fieldName, operator };
+          if (needsValue) {
+            entry.value = value;
+          }
+          filters.push(entry);
+        });
+        if (!filters.length) {
+          return;
+        }
+        alerts.push({ id: alertId, label, filters });
+        seen.add(alertId);
+      });
+      return alerts;
+    }
+
+    function handleAlertListClick(event) {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+      const alertId = button.dataset.alertId;
+      if (!alertId) {
+        return;
+      }
+      if (button.dataset.action === "delete-alert") {
+        setupAlertsState = setupAlertsState.filter((alert) => alert && alert.id !== alertId);
+        renderSetupAlerts();
+        return;
+      }
+      const alert = findAlertById(alertId);
+      if (!alert) {
+        return;
+      }
+      if (button.dataset.action === "add-filter") {
+        alert.filters.push(createAlertFilter());
+        renderSetupAlerts();
+        return;
+      }
+      if (button.dataset.action === "delete-filter") {
+        const filterId = button.dataset.filterId;
+        alert.filters = (alert.filters || []).filter((filter) => filter && filter.id !== filterId);
+        if (!alert.filters.length) {
+          alert.filters.push(createAlertFilter());
+        }
+        renderSetupAlerts();
+      }
+    }
+
+    function handleAlertListChange(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) {
+        return;
+      }
+      const alertId = target.dataset.alertId;
+      const filterId = target.dataset.filterId;
+      const alert = findAlertById(alertId);
+      const filter = findAlertFilter(alert, filterId);
+      if (!filter) {
+        return;
+      }
+      if (target.dataset.role === "alert-object") {
+        filter.object = target.value;
+        loadAlertFieldSuggestions(alertId, filterId);
+        return;
+      }
+      if (target.dataset.role === "alert-operator") {
+        filter.operator = normalizeOperator(target.value);
+        updateAlertFilterValueState(alertId, filterId);
+      }
+    }
+
+    function handleAlertListInput(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      const alertId = target.dataset.alertId;
+      const alert = findAlertById(alertId);
+      if (!alert) {
+        return;
+      }
+      const role = target.dataset.role;
+      if (role === "alert-label") {
+        alert.label = target.value;
+        return;
+      }
+      const filterId = target.dataset.filterId;
+      const filter = findAlertFilter(alert, filterId);
+      if (!filter) {
+        return;
+      }
+      if (role === "alert-field") {
+        filter.field = target.value;
+      }
+      if (role === "alert-value") {
+        filter.value = target.value;
+      }
+    }
+
     function openSetupModal() {
       setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
       setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
+      setupAlertsState = Array.isArray(configState.alerts)
+        ? configState.alerts.map((alert) => cloneAlertState(alert))
+        : [];
       renderSetupObjectList();
       renderSetupFields();
       populateSetupFieldValues();
+      renderSetupAlerts();
       setupViewInputs.forEach((input) => {
         input.checked = input.value === setupViewMode;
       });
@@ -1596,6 +2309,7 @@
           hidden: Boolean(item.hidden),
         })),
         viewMode: setupViewMode,
+        alerts: gatherSetupAlerts(),
       };
       fetch("/api/account-explorer/config", {
         method: "POST",
@@ -1615,11 +2329,16 @@
           objectDefinitions = normalizeObjectDefinitions(
             data?.connectedObjects || objectDefinitions
           );
+          if (!Array.isArray(configState.alerts)) {
+            configState.alerts = [];
+          }
           window.ACCOUNT_EXPLORER_CONFIG = configState;
           window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
           setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
           populateSetupFieldValues();
           renderSetupObjectList();
+          setupAlertsState = configState.alerts.map((alert) => cloneAlertState(alert));
+          renderSetupAlerts();
           setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
           setupViewInputs.forEach((input) => {
             input.checked = input.value === setupViewMode;
@@ -1628,6 +2347,7 @@
           showToast(translateKey("frontend.account_explorer.config_saved"), "success");
           if (explorerResult && explorerResult.data) {
             explorerResult.data.objects = objectDefinitions;
+            explorerResult.data.alerts = configState.alerts;
             renderResults(explorerResult);
           } else {
             renderTree(selectedAccountId ? getAccountById(selectedAccountId) : null);
@@ -1684,6 +2404,17 @@
     }
     if (setupSaveButton) {
       setupSaveButton.addEventListener("click", saveSetupConfiguration);
+    }
+    if (setupAlertAddButton) {
+      setupAlertAddButton.addEventListener("click", () => {
+        setupAlertsState.push(cloneAlertState({}));
+        renderSetupAlerts();
+      });
+    }
+    if (setupAlertList) {
+      setupAlertList.addEventListener("click", handleAlertListClick);
+      setupAlertList.addEventListener("change", handleAlertListChange);
+      setupAlertList.addEventListener("input", handleAlertListInput);
     }
     if (setupObjectList) {
       setupObjectList.addEventListener("click", (event) => {

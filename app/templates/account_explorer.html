@@ -152,6 +152,27 @@
         </div>
         <hr class="my-4" />
         <div>
+          <div class="d-flex flex-wrap gap-3 align-items-start justify-content-between">
+            <div>
+              <h6 class="fw-semibold mb-1">{{ t('account_explorer.setup.alerts.title') }}</h6>
+              <p class="text-muted small mb-0">{{ t('account_explorer.setup.alerts.description') }}</p>
+            </div>
+            <a
+              class="small text-decoration-none"
+              href="{{ url_for('main.guide') }}#account-alerts"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ t('account_explorer.setup.alerts.guide_link') }}
+            </a>
+          </div>
+          <div class="d-flex flex-column gap-3 mt-3" id="account-explorer-setup-alert-list"></div>
+          <button type="button" class="btn btn-outline-primary btn-sm mt-3" id="account-explorer-setup-alert-add">
+            {{ t('account_explorer.setup.alerts.add_alert') }}
+          </button>
+        </div>
+        <hr class="my-4" />
+        <div>
           <h6 class="fw-semibold">{{ t('account_explorer.setup.view_title') }}</h6>
           <p class="text-muted small">{{ t('account_explorer.setup.view_help') }}</p>
           <div class="d-flex gap-3 flex-wrap">
