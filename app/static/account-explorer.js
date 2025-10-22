@@ -154,6 +154,7 @@
     const accountHeading = document.getElementById("account-explorer-account-heading");
     const accountFields = document.getElementById("account-explorer-account-fields");
     const accountRelated = document.getElementById("account-explorer-related");
+    const accountAlertsContainer = document.getElementById("account-explorer-account-alerts");
     const accountEmpty = document.getElementById("account-explorer-account-empty");
     const treeViewContainer = document.getElementById("account-explorer-tree-view");
     const treeToolbar = document.getElementById("account-explorer-tree-toolbar");
@@ -174,6 +175,8 @@
     const setupViewInputs = Array.from(
       document.querySelectorAll('input[name="account-explorer-setup-view"]')
     );
+    const setupAlertsContainer = document.getElementById("account-explorer-setup-alerts");
+    const setupAddAlertButton = document.getElementById("account-explorer-setup-alert-add");
 
     if (!parseButton || !clearButton || !previewList || !orgSelect) {
       return;
@@ -194,13 +197,24 @@
     if (!VIEW_MODES.has(configState.viewMode)) {
       configState.viewMode = DEFAULT_VIEW_MODE;
     }
+    if (!Array.isArray(configState.alerts)) {
+      configState.alerts = [];
+    }
+    if (!configState.availableFields || typeof configState.availableFields !== "object") {
+      configState.availableFields = {};
+    }
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
 
     let setupObjectsState = [];
     let setupViewMode = currentViewMode;
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
+    const setupAlertExpressionInputs = new Map();
     const fieldCache = new Map();
+    let setupAlertsState = Array.isArray(configState.alerts)
+      ? configState.alerts.map((item) => ({ ...item }))
+      : [];
+    let alertObjectDatalist = null;
 
     function isObjectVisible(key) {
       const definition = objectDefinitions.find((item) => item.key === key);
@@ -282,6 +296,280 @@
       if (currentValue && selectEl.querySelector(`option[value="${currentValue}"]`)) {
         selectEl.value = currentValue;
       }
+    }
+
+    function ensureAlertObjectDatalist() {
+      if (alertObjectDatalist && alertObjectDatalist.isConnected) {
+        return alertObjectDatalist;
+      }
+      alertObjectDatalist = document.createElement("datalist");
+      alertObjectDatalist.id = "account-explorer-alert-object-options";
+      if (setupModalEl) {
+        setupModalEl.appendChild(alertObjectDatalist);
+      } else {
+        document.body.appendChild(alertObjectDatalist);
+      }
+      return alertObjectDatalist;
+    }
+
+    function refreshAlertObjectOptions() {
+      const datalist = ensureAlertObjectDatalist();
+      datalist.innerHTML = "";
+      objectDefinitions.forEach((definition) => {
+        const option = document.createElement("option");
+        option.value = definition.key;
+        option.label = definition.label;
+        datalist.appendChild(option);
+      });
+      const accountOption = document.createElement("option");
+      accountOption.value = "Account";
+      accountOption.label = translateKey("account_explorer.results.account_label");
+      datalist.appendChild(accountOption);
+    }
+
+    function getAlertFieldOptions(objectKey) {
+      if (!objectKey) {
+        return [];
+      }
+      const fields = configState?.availableFields?.[objectKey];
+      if (Array.isArray(fields)) {
+        return fields;
+      }
+      const configured = configState?.fields?.[objectKey];
+      if (Array.isArray(configured)) {
+        return configured;
+      }
+      return [];
+    }
+
+    function updateAlertFieldOptions(objectKey, datalist) {
+      if (!datalist) {
+        return;
+      }
+      const options = getAlertFieldOptions(objectKey);
+      datalist.innerHTML = "";
+      options.forEach((field) => {
+        const option = document.createElement("option");
+        option.value = field;
+        datalist.appendChild(option);
+      });
+    }
+
+    function generateAlertId() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return `alert-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+    }
+
+    function insertTextAtCursor(textarea, text) {
+      if (!textarea || typeof text !== "string" || !text) {
+        return;
+      }
+      const value = textarea.value || "";
+      const start = textarea.selectionStart ?? value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value = `${value.slice(0, start)}${text}${value.slice(end)}`;
+      const newPos = start + text.length;
+      textarea.focus();
+      if (typeof textarea.setSelectionRange === "function") {
+        textarea.setSelectionRange(newPos, newPos);
+      }
+      const event = new Event("input", { bubbles: true });
+      textarea.dispatchEvent(event);
+    }
+
+    function insertAlertToken(alertId, objectName, fieldName) {
+      const textarea = setupAlertExpressionInputs.get(alertId);
+      if (!textarea) {
+        return;
+      }
+      const objectPart = (objectName || "").trim();
+      const fieldPart = (fieldName || "").trim();
+      if (!objectPart && !fieldPart) {
+        return;
+      }
+      const token = objectPart && fieldPart ? `${objectPart}.${fieldPart}` : objectPart || fieldPart;
+      insertTextAtCursor(textarea, token);
+    }
+
+    function gatherSetupAlerts() {
+      const alerts = [];
+      setupAlertsState.forEach((alert) => {
+        const id = typeof alert?.id === "string" && alert.id ? alert.id : generateAlertId();
+        const label = typeof alert?.label === "string" ? alert.label.trim() : "";
+        const expression = typeof alert?.expression === "string" ? alert.expression.trim() : "";
+        const description = typeof alert?.description === "string" ? alert.description.trim() : "";
+        if (!label || !expression) {
+          return;
+        }
+        const payload = { id, label, expression };
+        if (description) {
+          payload.description = description;
+        }
+        alerts.push(payload);
+      });
+      return alerts;
+    }
+
+    function updateAlertState(alertId, key, value) {
+      const alert = setupAlertsState.find((entry) => entry.id === alertId);
+      if (!alert) {
+        return;
+      }
+      alert[key] = value;
+    }
+
+    function renderSetupAlerts() {
+      if (!setupAlertsContainer) {
+        return;
+      }
+      refreshAlertObjectOptions();
+      setupAlertExpressionInputs.clear();
+      setupAlertsContainer.innerHTML = "";
+      if (!setupAlertsState.length) {
+        const empty = document.createElement("div");
+        empty.className = "text-muted small";
+        empty.textContent = translateKey("account_explorer.setup.alerts_empty");
+        setupAlertsContainer.appendChild(empty);
+        return;
+      }
+      setupAlertsState.forEach((alert) => {
+        const alertId = typeof alert?.id === "string" && alert.id ? alert.id : generateAlertId();
+        alert.id = alertId;
+        const card = document.createElement("div");
+        card.className = "card shadow-sm";
+        card.dataset.alertId = alertId;
+        const body = document.createElement("div");
+        body.className = "card-body";
+
+        const nameGroup = document.createElement("div");
+        nameGroup.className = "mb-3";
+        const nameLabel = document.createElement("label");
+        nameLabel.className = "form-label small fw-semibold";
+        nameLabel.setAttribute("for", `account-explorer-alert-name-${alertId}`);
+        nameLabel.textContent = translateKey("account_explorer.setup.alerts_name_label");
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.className = "form-control";
+        nameInput.id = `account-explorer-alert-name-${alertId}`;
+        nameInput.value = alert.label || "";
+        nameInput.setAttribute("data-role", "alert-name");
+        nameGroup.appendChild(nameLabel);
+        nameGroup.appendChild(nameInput);
+        body.appendChild(nameGroup);
+
+        const descriptionGroup = document.createElement("div");
+        descriptionGroup.className = "mb-3";
+        const descriptionLabel = document.createElement("label");
+        descriptionLabel.className = "form-label small";
+        descriptionLabel.setAttribute("for", `account-explorer-alert-description-${alertId}`);
+        descriptionLabel.textContent = translateKey("account_explorer.setup.alerts_description_label");
+        const descriptionInput = document.createElement("input");
+        descriptionInput.type = "text";
+        descriptionInput.className = "form-control";
+        descriptionInput.id = `account-explorer-alert-description-${alertId}`;
+        descriptionInput.value = alert.description || "";
+        descriptionInput.setAttribute("data-role", "alert-description");
+        descriptionGroup.appendChild(descriptionLabel);
+        descriptionGroup.appendChild(descriptionInput);
+        body.appendChild(descriptionGroup);
+
+        const expressionGroup = document.createElement("div");
+        expressionGroup.className = "mb-3";
+        const expressionLabel = document.createElement("label");
+        expressionLabel.className = "form-label small";
+        expressionLabel.setAttribute("for", `account-explorer-alert-expression-${alertId}`);
+        expressionLabel.textContent = translateKey("account_explorer.setup.alerts_expression_label");
+        const expressionInput = document.createElement("textarea");
+        expressionInput.className = "form-control";
+        expressionInput.rows = 3;
+        expressionInput.id = `account-explorer-alert-expression-${alertId}`;
+        expressionInput.value = alert.expression || "";
+        expressionInput.setAttribute("data-role", "alert-expression");
+        const expressionHelp = document.createElement("div");
+        expressionHelp.className = "form-text";
+        expressionHelp.textContent = translateKey("account_explorer.setup.alerts_expression_help");
+        expressionGroup.appendChild(expressionLabel);
+        expressionGroup.appendChild(expressionInput);
+        expressionGroup.appendChild(expressionHelp);
+        body.appendChild(expressionGroup);
+        setupAlertExpressionInputs.set(alertId, expressionInput);
+
+        const insertRow = document.createElement("div");
+        insertRow.className = "row g-2 align-items-end mb-3";
+        const objectCol = document.createElement("div");
+        objectCol.className = "col-sm-4";
+        const objectLabel = document.createElement("label");
+        objectLabel.className = "form-label small";
+        objectLabel.textContent = translateKey("account_explorer.setup.alerts_object_label");
+        const objectInput = document.createElement("input");
+        objectInput.type = "text";
+        objectInput.className = "form-control";
+        objectInput.setAttribute("list", "account-explorer-alert-object-options");
+        objectInput.setAttribute("data-role", "alert-object");
+        objectInput.placeholder = translateKey("account_explorer.setup.alerts_object_placeholder");
+        objectCol.appendChild(objectLabel);
+        objectCol.appendChild(objectInput);
+        insertRow.appendChild(objectCol);
+
+        const fieldCol = document.createElement("div");
+        fieldCol.className = "col-sm-4";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.className = "form-label small";
+        fieldLabel.textContent = translateKey("account_explorer.setup.alerts_field_label");
+        const fieldInput = document.createElement("input");
+        fieldInput.type = "text";
+        fieldInput.className = "form-control";
+        fieldInput.setAttribute("data-role", "alert-field");
+        fieldInput.placeholder = translateKey("account_explorer.setup.alerts_field_placeholder");
+        const fieldDatalist = document.createElement("datalist");
+        fieldDatalist.id = `account-explorer-alert-fields-${alertId}`;
+        fieldInput.setAttribute("list", fieldDatalist.id);
+        fieldCol.appendChild(fieldLabel);
+        fieldCol.appendChild(fieldInput);
+        insertRow.appendChild(fieldCol);
+
+        const buttonCol = document.createElement("div");
+        buttonCol.className = "col-sm-4 col-md-3 col-xl-2 d-grid";
+        const insertButton = document.createElement("button");
+        insertButton.type = "button";
+        insertButton.className = "btn btn-outline-secondary";
+        insertButton.dataset.action = "insert-field";
+        insertButton.textContent = translateKey("account_explorer.setup.alerts_insert_button");
+        buttonCol.appendChild(insertButton);
+        insertRow.appendChild(buttonCol);
+        insertRow.appendChild(fieldDatalist);
+        body.appendChild(insertRow);
+
+        objectInput.addEventListener("input", () => {
+          updateAlertFieldOptions(objectInput.value.trim(), fieldDatalist);
+        });
+        objectInput.addEventListener("change", () => {
+          updateAlertFieldOptions(objectInput.value.trim(), fieldDatalist);
+        });
+        updateAlertFieldOptions("", fieldDatalist);
+
+        fieldInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            insertAlertToken(alertId, objectInput.value, fieldInput.value);
+          }
+        });
+
+        const removeRow = document.createElement("div");
+        removeRow.className = "d-flex justify-content-end";
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "btn btn-outline-danger btn-sm";
+        removeButton.dataset.action = "remove-alert";
+        removeButton.textContent = translateKey("account_explorer.setup.alerts_remove");
+        removeRow.appendChild(removeButton);
+        body.appendChild(removeRow);
+
+        card.appendChild(body);
+        setupAlertsContainer.appendChild(card);
+      });
     }
 
     function fetchOrgs() {
@@ -385,6 +673,66 @@
       });
     }
 
+    function buildAlertTooltip(alerts) {
+      if (!Array.isArray(alerts) || !alerts.length) {
+        return "";
+      }
+      return alerts
+        .map((alert) => {
+          const label = alert?.label ? String(alert.label) : translateKey("account_explorer.results.alert_default");
+          const description = alert?.description ? ` — ${alert.description}` : "";
+          return `${label}${description}`;
+        })
+        .join("\n");
+    }
+
+    function createAlertBadge(alert, { compact = false } = {}) {
+      const badge = document.createElement("span");
+      badge.className = compact
+        ? "badge rounded-pill account-alert-badge"
+        : "badge account-alert-badge";
+      badge.textContent = alert?.label
+        ? String(alert.label)
+        : translateKey("account_explorer.results.alert_default");
+      if (alert?.description) {
+        badge.title = `${alert.label}: ${alert.description}`;
+      }
+      return badge;
+    }
+
+    function renderAccountAlertDetails(account) {
+      if (!accountAlertsContainer) {
+        return;
+      }
+      accountAlertsContainer.innerHTML = "";
+      const alerts = Array.isArray(account?.alerts) ? account.alerts : [];
+      if (!alerts.length) {
+        accountAlertsContainer.classList.add("d-none");
+        return;
+      }
+      accountAlertsContainer.classList.remove("d-none");
+      const heading = document.createElement("div");
+      heading.className = "text-muted text-uppercase small fw-semibold";
+      heading.textContent = translateKey("account_explorer.results.alerts_heading");
+      accountAlertsContainer.appendChild(heading);
+      const list = document.createElement("div");
+      list.className = "d-flex flex-column gap-2";
+      alerts.forEach((alert) => {
+        const item = document.createElement("div");
+        item.className = "account-alert-detail";
+        const row = document.createElement("div");
+        row.className = "d-flex flex-wrap align-items-center gap-2";
+        row.appendChild(createAlertBadge(alert));
+        const description = document.createElement("div");
+        description.className = "text-muted small flex-grow-1";
+        description.textContent = alert?.description || translateKey("account_explorer.results.alert_no_description");
+        row.appendChild(description);
+        item.appendChild(row);
+        list.appendChild(item);
+      });
+      accountAlertsContainer.appendChild(list);
+    }
+
     function renderTreeFieldList(container, fields) {
       container.innerHTML = "";
       const visibleFields = Array.isArray(fields)
@@ -462,6 +810,31 @@
             dl.className = "row mb-0 small";
             renderFieldList(dl, record.fields || []);
             card.appendChild(dl);
+            const alerts = Array.isArray(record.alerts) ? record.alerts : [];
+            if (alerts.length) {
+              card.classList.add("account-record--alert");
+              const tooltip = buildAlertTooltip(alerts);
+              if (tooltip) {
+                card.title = tooltip;
+              }
+              const alertList = document.createElement("div");
+              alertList.className = "account-record-alerts d-flex flex-wrap gap-2 mt-2";
+              const limit = 3;
+              alerts.slice(0, limit).forEach((alert) => {
+                alertList.appendChild(createAlertBadge(alert, { compact: true }));
+              });
+              if (alerts.length > limit) {
+                const moreBadge = document.createElement("span");
+                moreBadge.className = "badge account-alert-badge account-alert-badge--more";
+                moreBadge.textContent = translateKey("account_explorer.results.alerts_more", {
+                  count: alerts.length - limit,
+                });
+                alertList.appendChild(moreBadge);
+              }
+              card.appendChild(alertList);
+            } else {
+              card.removeAttribute("title");
+            }
             section.appendChild(card);
           });
         }
@@ -560,6 +933,29 @@
         fieldsContainer.className = "account-tree-node__fields";
         renderTreeFieldList(fieldsContainer, record.fields || []);
         node.appendChild(fieldsContainer);
+      }
+      const alerts = Array.isArray(record.alerts) ? record.alerts : [];
+      if (alerts.length) {
+        node.classList.add("account-tree-node--alert");
+        const tooltip = buildAlertTooltip(alerts);
+        if (tooltip) {
+          node.title = tooltip;
+        }
+        const alertContainer = document.createElement("div");
+        alertContainer.className = "account-tree-node__alerts";
+        const limit = 3;
+        alerts.slice(0, limit).forEach((alert) => {
+          alertContainer.appendChild(createAlertBadge(alert, { compact: true }));
+        });
+        if (alerts.length > limit) {
+          const moreBadge = document.createElement("span");
+          moreBadge.className = "badge account-alert-badge account-alert-badge--more";
+          moreBadge.textContent = translateKey("account_explorer.results.alerts_more", {
+            count: alerts.length - limit,
+          });
+          alertContainer.appendChild(moreBadge);
+        }
+        node.appendChild(alertContainer);
       }
       return node;
     }
@@ -778,6 +1174,28 @@
         meta.className = "account-tree-header__meta text-muted";
         meta.textContent = account.id;
         header.appendChild(meta);
+      }
+      const alerts = Array.isArray(account.alerts) ? account.alerts : [];
+      if (alerts.length) {
+        const alertContainer = document.createElement("div");
+        alertContainer.className = "account-tree-header__alerts d-flex flex-wrap gap-2 mt-2";
+        const limit = 3;
+        alerts.slice(0, limit).forEach((alert) => {
+          alertContainer.appendChild(createAlertBadge(alert, { compact: true }));
+        });
+        if (alerts.length > limit) {
+          const moreBadge = document.createElement("span");
+          moreBadge.className = "badge account-alert-badge account-alert-badge--more";
+          moreBadge.textContent = translateKey("account_explorer.results.alerts_more", {
+            count: alerts.length - limit,
+          });
+          alertContainer.appendChild(moreBadge);
+        }
+        const tooltip = buildAlertTooltip(alerts);
+        if (tooltip) {
+          alertContainer.title = tooltip;
+        }
+        header.appendChild(alertContainer);
       }
       return header;
     }
@@ -1034,11 +1452,16 @@
       if (!account) {
         accountDetails.classList.add("d-none");
         accountEmpty.classList.remove("d-none");
+        if (accountAlertsContainer) {
+          accountAlertsContainer.classList.add("d-none");
+          accountAlertsContainer.innerHTML = "";
+        }
         return;
       }
       accountEmpty.classList.add("d-none");
       accountDetails.classList.remove("d-none");
       accountHeading.textContent = getAccountDisplayName(account) || account.id;
+      renderAccountAlertDetails(account);
       renderFieldList(accountFields, account.fields || []);
       renderRelatedSection(accountRelated, account.related || {});
     }
@@ -1129,6 +1552,32 @@
         subtitle.textContent = account.id;
         button.appendChild(title);
         button.appendChild(subtitle);
+        const accountAlerts = Array.isArray(account.alerts) ? account.alerts : [];
+        if (accountAlerts.length) {
+          button.classList.add("account-alert-item");
+          const tooltip = buildAlertTooltip(accountAlerts);
+          if (tooltip) {
+            button.title = tooltip;
+          }
+          const badges = document.createElement("div");
+          badges.className = "account-alert-badges d-flex flex-wrap gap-1 mt-2";
+          const limit = 2;
+          accountAlerts.slice(0, limit).forEach((alert) => {
+            badges.appendChild(createAlertBadge(alert, { compact: true }));
+          });
+          if (accountAlerts.length > limit) {
+            const moreBadge = document.createElement("span");
+            moreBadge.className = "badge account-alert-badge account-alert-badge--more";
+            moreBadge.textContent = translateKey("account_explorer.results.alerts_more", {
+              count: accountAlerts.length - limit,
+            });
+            badges.appendChild(moreBadge);
+          }
+          button.appendChild(badges);
+        } else {
+          button.classList.remove("account-alert-item");
+          button.removeAttribute("title");
+        }
         button.addEventListener("click", () => {
           renderAccount(account.id);
         });
@@ -1574,9 +2023,13 @@
     function openSetupModal() {
       setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
       setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
+      setupAlertsState = Array.isArray(configState.alerts)
+        ? configState.alerts.map((item) => ({ ...item }))
+        : [];
       renderSetupObjectList();
       renderSetupFields();
       populateSetupFieldValues();
+      renderSetupAlerts();
       setupViewInputs.forEach((input) => {
         input.checked = input.value === setupViewMode;
       });
@@ -1596,6 +2049,7 @@
           hidden: Boolean(item.hidden),
         })),
         viewMode: setupViewMode,
+        alerts: gatherSetupAlerts(),
       };
       fetch("/api/account-explorer/config", {
         method: "POST",
@@ -1611,16 +2065,31 @@
           if (!ok) {
             throw new Error("save_failed");
           }
-          configState = data?.config ? { ...data.config } : configState;
+          if (data?.config) {
+            configState = { ...data.config };
+          }
+          if (!VIEW_MODES.has(configState.viewMode)) {
+            configState.viewMode = DEFAULT_VIEW_MODE;
+          }
+          if (!Array.isArray(configState.alerts)) {
+            configState.alerts = [];
+          }
+          if (!configState.availableFields || typeof configState.availableFields !== "object") {
+            configState.availableFields = {};
+          }
           objectDefinitions = normalizeObjectDefinitions(
             data?.connectedObjects || objectDefinitions
           );
           window.ACCOUNT_EXPLORER_CONFIG = configState;
           window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
           setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
-          populateSetupFieldValues();
-          renderSetupObjectList();
           setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
+          setupAlertsState = configState.alerts.map((item) => ({ ...item }));
+          renderSetupObjectList();
+          renderSetupFields();
+          populateSetupFieldValues();
+          renderSetupAlerts();
+          refreshAlertObjectOptions();
           setupViewInputs.forEach((input) => {
             input.checked = input.value === setupViewMode;
           });
@@ -1628,6 +2097,9 @@
           showToast(translateKey("frontend.account_explorer.config_saved"), "success");
           if (explorerResult && explorerResult.data) {
             explorerResult.data.objects = objectDefinitions;
+            explorerResult.data.alerts = Array.isArray(configState.alerts)
+              ? configState.alerts.map((item) => ({ ...item }))
+              : [];
             renderResults(explorerResult);
           } else {
             renderTree(selectedAccountId ? getAccountById(selectedAccountId) : null);
@@ -1750,6 +2222,79 @@
         }
       });
     });
+
+    if (setupAddAlertButton) {
+      setupAddAlertButton.addEventListener("click", () => {
+        setupAlertsState.push({
+          id: generateAlertId(),
+          label: "",
+          description: "",
+          expression: "",
+        });
+        renderSetupAlerts();
+      });
+    }
+
+    if (setupAlertsContainer) {
+      setupAlertsContainer.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) {
+          return;
+        }
+        const wrapper = button.closest("[data-alert-id]");
+        if (!wrapper) {
+          return;
+        }
+        const alertId = wrapper.dataset.alertId;
+        if (!alertId) {
+          return;
+        }
+        if (button.dataset.action === "remove-alert") {
+          setupAlertsState = setupAlertsState.filter((alert) => alert.id !== alertId);
+          renderSetupAlerts();
+        }
+        if (button.dataset.action === "insert-field") {
+          const objectInput = wrapper.querySelector('[data-role="alert-object"]');
+          const fieldInput = wrapper.querySelector('[data-role="alert-field"]');
+          insertAlertToken(
+            alertId,
+            objectInput ? objectInput.value : "",
+            fieldInput ? fieldInput.value : ""
+          );
+        }
+      });
+      setupAlertsContainer.addEventListener("input", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const wrapper = target.closest("[data-alert-id]");
+        if (!wrapper) {
+          return;
+        }
+        const alertId = wrapper.dataset.alertId;
+        if (!alertId) {
+          return;
+        }
+        if (target.dataset.role === "alert-name") {
+          updateAlertState(alertId, "label", target.value);
+        }
+        if (target.dataset.role === "alert-description") {
+          updateAlertState(alertId, "description", target.value);
+        }
+        if (target.dataset.role === "alert-expression") {
+          updateAlertState(alertId, "expression", target.value);
+        }
+        if (target.dataset.role === "alert-object") {
+          const datalist = wrapper.querySelector(`datalist[id^="account-explorer-alert-fields-"]`);
+          if (datalist) {
+            updateAlertFieldOptions(target.value.trim(), datalist);
+          }
+        }
+      });
+    }
+
+    refreshAlertObjectOptions();
 
     fetchOrgs();
 
