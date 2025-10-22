@@ -57,6 +57,173 @@ def _sanitize_contact_point_sources(raw: object) -> Dict[str, Dict[str, bool]]:
     return sanitized
 
 
+_ADVANCED_ALERT_MODE = "advanced"
+_BASIC_ALERT_MODE = "basic"
+_ADVANCED_ENTITY_COMPARISON_OPERATORS: Set[str] = {
+    "equals",
+    "equals_ignore_case",
+    "not_equals",
+    "contains",
+    "not_contains",
+    "starts_with",
+}
+
+
+def _sanitize_basic_alert(alert: Dict[str, object]) -> Optional[Dict[str, object]]:
+    filters_payload = alert.get("filters") if isinstance(alert.get("filters"), list) else []
+    filters: List[Dict[str, object]] = []
+    for item in filters_payload:
+        if not isinstance(item, dict):
+            continue
+        object_key = str(item.get("object") or "").strip()
+        field_name = str(item.get("field") or "").strip()
+        operator = str(item.get("operator") or "").strip()
+        if not object_key or not field_name or operator not in _ALERT_OPERATORS:
+            continue
+        value = item.get("value")
+        if operator not in _ALERT_VALUELESS_OPERATORS:
+            if not isinstance(value, str):
+                value = str(value) if value is not None else ""
+            value = value.strip()
+            if not value:
+                continue
+            entry = {
+                "object": object_key,
+                "field": field_name,
+                "operator": operator,
+                "value": value,
+            }
+        else:
+            entry = {
+                "object": object_key,
+                "field": field_name,
+                "operator": operator,
+            }
+        filters.append(entry)
+    if not filters:
+        return None
+    return {"filters": filters}
+
+
+def _sanitize_advanced_alert(alert: Dict[str, object]) -> Optional[Dict[str, object]]:
+    definition = alert.get("definition")
+    if not isinstance(definition, dict):
+        return None
+    raw_entities = definition.get("entities") if isinstance(definition.get("entities"), list) else []
+    if not raw_entities:
+        return None
+    entities: List[Dict[str, object]] = []
+    seen_aliases: Set[str] = set()
+    for entity in raw_entities:
+        if not isinstance(entity, dict):
+            continue
+        alias = str(entity.get("alias") or "").strip()
+        object_key = str(entity.get("object") or "").strip()
+        if not alias or alias in seen_aliases:
+            continue
+        if object_key not in _OBJECT_DEFINITIONS and object_key != "Account":
+            continue
+        distinct_from_raw = entity.get("distinctFrom") if isinstance(entity.get("distinctFrom"), list) else []
+        distinct_from: List[str] = []
+        for reference in distinct_from_raw:
+            ref_alias = str(reference or "").strip()
+            if ref_alias and ref_alias != alias and ref_alias not in distinct_from:
+                distinct_from.append(ref_alias)
+        entities.append({"alias": alias, "object": object_key, "distinctFrom": distinct_from})
+        seen_aliases.add(alias)
+    if not entities:
+        return None
+
+    logic = definition.get("logic") if isinstance(definition.get("logic"), dict) else None
+    if not logic:
+        return None
+
+    def sanitize_group(payload: Dict[str, object]) -> Optional[Dict[str, object]]:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("type") != "group":
+            return None
+        operator = str(payload.get("operator") or "and").lower()
+        if operator not in {"and", "or"}:
+            operator = "and"
+        children_payload = payload.get("children") if isinstance(payload.get("children"), list) else []
+        sanitized_children: List[Dict[str, object]] = []
+        for child in children_payload:
+            if not isinstance(child, dict):
+                continue
+            child_type = child.get("type")
+            if child_type == "group":
+                nested = sanitize_group(child)
+                if nested:
+                    sanitized_children.append(nested)
+            elif child_type == "condition":
+                entity_alias = str(child.get("entity") or "").strip()
+                field_name = str(child.get("field") or "").strip()
+                operator_key = str(child.get("operator") or "").strip()
+                if (
+                    not entity_alias
+                    or entity_alias not in seen_aliases
+                    or not field_name
+                    or operator_key not in _ALERT_OPERATORS
+                ):
+                    continue
+                value_type = str(child.get("valueType") or "value").lower()
+                if value_type == "entity":
+                    if operator_key not in _ADVANCED_ENTITY_COMPARISON_OPERATORS:
+                        continue
+                    target_alias = str(child.get("targetEntity") or "").strip()
+                    target_field = str(child.get("targetField") or "").strip()
+                    if not target_alias or target_alias not in seen_aliases or not target_field:
+                        continue
+                    sanitized_children.append(
+                        {
+                            "type": "condition",
+                            "entity": entity_alias,
+                            "field": field_name,
+                            "operator": operator_key,
+                            "valueType": "entity",
+                            "targetEntity": target_alias,
+                            "targetField": target_field,
+                        }
+                    )
+                else:
+                    if operator_key not in _ALERT_VALUELESS_OPERATORS:
+                        raw_value = child.get("value")
+                        if not isinstance(raw_value, str):
+                            raw_value = str(raw_value) if raw_value is not None else ""
+                        raw_value = raw_value.strip()
+                        if not raw_value:
+                            continue
+                        sanitized_children.append(
+                            {
+                                "type": "condition",
+                                "entity": entity_alias,
+                                "field": field_name,
+                                "operator": operator_key,
+                                "valueType": "value",
+                                "value": raw_value,
+                            }
+                        )
+                    else:
+                        sanitized_children.append(
+                            {
+                                "type": "condition",
+                                "entity": entity_alias,
+                                "field": field_name,
+                                "operator": operator_key,
+                                "valueType": "value",
+                            }
+                        )
+        if not sanitized_children:
+            return None
+        return {"type": "group", "operator": operator, "children": sanitized_children}
+
+    sanitized_logic = sanitize_group(logic)
+    if not sanitized_logic:
+        return None
+    return {"definition": {"entities": entities, "logic": sanitized_logic}}
+
+
 def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, object]]:
     sanitized: List[Dict[str, object]] = []
     seen_ids: Set[str] = set()
@@ -67,70 +234,26 @@ def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, 
         if alert_id in seen_ids:
             continue
         label = str(alert.get("label") or "").strip()
-        filters_payload = alert.get("filters") if isinstance(alert.get("filters"), list) else []
-        filters: List[Dict[str, object]] = []
-        for item in filters_payload:
-            if not isinstance(item, dict):
-                continue
-            object_key = str(item.get("object") or "").strip()
-            field_name = str(item.get("field") or "").strip()
-            operator = str(item.get("operator") or "").strip()
-            if not object_key or not field_name or operator not in _ALERT_OPERATORS:
-                continue
-            value = item.get("value")
-            if operator not in _ALERT_VALUELESS_OPERATORS:
-                if not isinstance(value, str):
-                    value = str(value) if value is not None else ""
-                value = value.strip()
-                if not value:
-                    continue
-                entry = {
-                    "object": object_key,
-                    "field": field_name,
-                    "operator": operator,
-                    "value": value,
-                }
+        mode = str(alert.get("mode") or "").strip().lower()
+        payload: Optional[Dict[str, object]]
+        if mode == _ADVANCED_ALERT_MODE:
+            payload = _sanitize_advanced_alert(alert)
+            if not payload:
+                payload = None
             else:
-                entry = {
-                    "object": object_key,
-                    "field": field_name,
-                    "operator": operator,
-                }
-            filters.append(entry)
-        if not filters:
+                payload["mode"] = _ADVANCED_ALERT_MODE
+        else:
+            payload = _sanitize_basic_alert(alert)
+            if payload:
+                payload["mode"] = _BASIC_ALERT_MODE
+        if not payload:
             continue
-        sanitized.append({"id": alert_id, "label": label or alert_id, "filters": filters})
+        payload.update({"id": alert_id, "label": label or alert_id})
+        if "filters" not in payload:
+            payload["filters"] = []
+        sanitized.append(payload)
         seen_ids.add(alert_id)
     return sanitized
-
-CONNECTED_OBJECTS: List[Dict[str, str]] = [
-    {"key": "BillingProfile__c", "label": "Billing Profile"},
-    {"key": "Contact", "label": "Contact"},
-    {"key": "Contract", "label": "Contract"},
-    {"key": "AccountContactRelation", "label": "Account Contact Relation"},
-    {"key": "Individual", "label": "Individual"},
-    {"key": "ContactPointPhone", "label": "Contact Point Phone"},
-    {"key": "ContactPointEmail", "label": "Contact Point Email"},
-    {"key": "Case", "label": "Case"},
-    {"key": "Order", "label": "Order"},
-    {"key": "Sale__c", "label": "Sale"},
-]
-
-_CONNECTED_OBJECT_LOOKUP: Dict[str, Dict[str, str]] = {
-    definition["key"]: definition for definition in CONNECTED_OBJECTS
-}
-
-_VALID_VIEW_MODES: Set[str] = {"list", "tree"}
-_DEFAULT_VIEW_MODE = "list"
-
-# Definition of the query requirements for each object.
-_CONTACT_POINT_SOURCE_ORDER: List[str] = ["contact", "individual"]
-_CONTACT_POINT_SOURCE_KEYS: Set[str] = set(_CONTACT_POINT_SOURCE_ORDER)
-_DEFAULT_CONTACT_POINT_SOURCES: Dict[str, bool] = {
-    "contact": True,
-    "individual": True,
-}
-
 
 _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "Account": {
@@ -142,36 +265,49 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "label": "Billing Profile",
         "required_fields": ["Account__c"],
         "filter_field": "Account__c",
+        "connections": [{"field": "Account__c", "target": "Account"}],
     },
     "Contact": {
         "label": "Contact",
         "required_fields": ["AccountId", "IndividualId"],
         "filter_field": "AccountId",
+        "connections": [
+            {"field": "AccountId", "target": "Account"},
+            {"field": "IndividualId", "target": "Individual"},
+        ],
     },
     "Contract": {
         "label": "Contract",
         "required_fields": ["AccountId"],
         "filter_field": "AccountId",
+        "connections": [{"field": "AccountId", "target": "Account"}],
     },
     "AccountContactRelation": {
         "label": "Account Contact Relation",
         "required_fields": ["AccountId", "ContactId"],
         "filter_field": "AccountId",
+        "connections": [
+            {"field": "AccountId", "target": "Account"},
+            {"field": "ContactId", "target": "Contact"},
+        ],
     },
     "Case": {
         "label": "Case",
         "required_fields": ["AccountId"],
         "filter_field": "AccountId",
+        "connections": [{"field": "AccountId", "target": "Account"}],
     },
     "Order": {
         "label": "Order",
         "required_fields": ["AccountId"],
         "filter_field": "AccountId",
+        "connections": [{"field": "AccountId", "target": "Account"}],
     },
     "Sale__c": {
         "label": "Sale",
         "required_fields": ["Account__c"],
         "filter_field": "Account__c",
+        "connections": [{"field": "Account__c", "target": "Account"}],
     },
     "Individual": {
         "label": "Individual",
@@ -183,12 +319,20 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "required_fields": [],
         "contact_field": "Contact__c",
         "individual_field": "ParentId",
+        "connections": [
+            {"field": "Contact__c", "target": "Contact"},
+            {"field": "ParentId", "target": "Individual"},
+        ],
     },
     "ContactPointEmail": {
         "label": "Contact Point Email",
         "required_fields": [],
         "contact_field": "Contact__c",
         "individual_field": "ParentId",
+        "connections": [
+            {"field": "Contact__c", "target": "Contact"},
+            {"field": "ParentId", "target": "Individual"},
+        ],
     },
 }
 
@@ -222,6 +366,59 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "Individual": ["FirstName", "LastName", "HasOptedOutTracking", "HasOptedOutProfiling"],
     "ContactPointPhone": ["TelephoneNumber", "IsPrimary", "UsageType", "Status__c"],
     "ContactPointEmail": ["EmailAddress", "IsPrimary", "UsageType", "Status__c"],
+}
+
+
+def _build_connected_object_definition(key: str) -> Dict[str, object]:
+    definition = _OBJECT_DEFINITIONS.get(key, {})
+    label = definition.get("label", key)
+    connections: List[Dict[str, str]] = []
+    raw_connections = definition.get("connections")
+    if isinstance(raw_connections, list):
+        for entry in raw_connections:
+            if not isinstance(entry, dict):
+                continue
+            field = str(entry.get("field") or "").strip()
+            target = str(entry.get("target") or "").strip()
+            if not field:
+                continue
+            connection_entry: Dict[str, str] = {"field": field}
+            if target:
+                connection_entry["target"] = target
+            connections.append(connection_entry)
+    return {"key": key, "label": label, "connections": connections}
+
+
+_CONNECTED_OBJECT_ORDER: List[str] = [
+    "BillingProfile__c",
+    "Contact",
+    "Contract",
+    "AccountContactRelation",
+    "Individual",
+    "ContactPointPhone",
+    "ContactPointEmail",
+    "Case",
+    "Order",
+    "Sale__c",
+]
+
+CONNECTED_OBJECTS: List[Dict[str, object]] = [
+    _build_connected_object_definition(key) for key in _CONNECTED_OBJECT_ORDER
+]
+
+_CONNECTED_OBJECT_LOOKUP: Dict[str, Dict[str, object]] = {
+    definition["key"]: definition for definition in CONNECTED_OBJECTS
+}
+
+_VALID_VIEW_MODES: Set[str] = {"list", "tree"}
+_DEFAULT_VIEW_MODE = "list"
+
+# Definition of the query requirements for each object.
+_CONTACT_POINT_SOURCE_ORDER: List[str] = ["contact", "individual"]
+_CONTACT_POINT_SOURCE_KEYS: Set[str] = set(_CONTACT_POINT_SOURCE_ORDER)
+_DEFAULT_CONTACT_POINT_SOURCES: Dict[str, bool] = {
+    "contact": True,
+    "individual": True,
 }
 
 
@@ -958,6 +1155,275 @@ def _matches_alert_condition(value: object, operator: str, target: Optional[str]
     return False
 
 
+def _compare_field_values(left: object, right: object, operator: str) -> bool:
+    if operator in _ALERT_VALUELESS_OPERATORS:
+        return _matches_alert_condition(left, operator, None)
+    target = _stringify_alert_value(right)
+    return _matches_alert_condition(left, operator, target)
+
+
+def _build_advanced_entity_lookup(
+    entities: Sequence[Dict[str, object]]
+) -> Tuple[List[Dict[str, object]], Dict[str, Dict[str, object]]]:
+    ordered: List[Dict[str, object]] = []
+    lookup: Dict[str, Dict[str, object]] = {}
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        alias = str(entity.get("alias") or "").strip()
+        object_key = str(entity.get("object") or "").strip()
+        if not alias or not object_key:
+            continue
+        if alias in lookup:
+            continue
+        distinct_from_raw = entity.get("distinctFrom") if isinstance(entity.get("distinctFrom"), list) else []
+        distinct_from: Set[str] = set()
+        for ref in distinct_from_raw:
+            ref_alias = str(ref or "").strip()
+            if ref_alias and ref_alias != alias:
+                distinct_from.add(ref_alias)
+        entry = {"alias": alias, "object": object_key, "distinctFrom": distinct_from}
+        ordered.append(entry)
+        lookup[alias] = entry
+    return ordered, lookup
+
+
+def _enumerate_advanced_contexts(
+    entities: Sequence[Dict[str, object]],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+) -> List[Dict[str, Dict[str, object]]]:
+    contexts: List[Dict[str, Dict[str, object]]] = []
+
+    def records_for_entity(entity: Dict[str, object]) -> List[Tuple[str, Dict[str, object]]]:
+        object_key = str(entity.get("object") or "")
+        if object_key == "Account":
+            account_key, account_record = account_pair
+            return [(account_key, account_record)]
+        return list(records_by_object.get(object_key, []))
+
+    def records_match(existing: Dict[str, Dict[str, object]], alias: str, candidate: Tuple[str, Dict[str, object]]) -> bool:
+        entry = existing.get(alias)
+        if not entry:
+            return False
+        record = entry.get("record")
+        candidate_record = candidate[1]
+        if isinstance(record, dict) and isinstance(candidate_record, dict):
+            record_id = record.get("Id")
+            candidate_id = candidate_record.get("Id")
+            if record_id and candidate_id:
+                return str(record_id) == str(candidate_id)
+        return entry.get("key") == candidate[0]
+
+    def recurse(index: int, current: Dict[str, Dict[str, object]]):
+        if index >= len(entities):
+            contexts.append({alias: dict(value) for alias, value in current.items()})
+            return
+        entity = entities[index]
+        alias = str(entity.get("alias") or "")
+        if not alias:
+            recurse(index + 1, current)
+            return
+        candidates = records_for_entity(entity)
+        if not candidates:
+            return
+        distinct_from = entity.get("distinctFrom") if isinstance(entity.get("distinctFrom"), set) else set()
+        for candidate in candidates:
+            skip = False
+            for ref_alias in distinct_from:
+                if ref_alias in current and records_match(current, ref_alias, candidate):
+                    skip = True
+                    break
+            if skip:
+                continue
+            current[alias] = {"key": candidate[0], "record": candidate[1]}
+            recurse(index + 1, current)
+            current.pop(alias, None)
+
+    recurse(0, {})
+    return contexts
+
+
+def _evaluate_advanced_node(
+    node: Dict[str, object],
+    context: Dict[str, Dict[str, object]],
+) -> Tuple[bool, List[Dict[str, object]]]:
+    node_type = node.get("type")
+    if node_type == "group":
+        operator = str(node.get("operator") or "and").lower()
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        if operator not in {"and", "or"}:
+            operator = "and"
+        if not children:
+            return False, []
+        if operator == "and":
+            collected: List[Dict[str, object]] = []
+            for child in children:
+                if not isinstance(child, dict):
+                    return False, []
+                passed, details = _evaluate_advanced_node(child, context)
+                if not passed:
+                    return False, []
+                collected.extend(details)
+            return True, collected
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            passed, details = _evaluate_advanced_node(child, context)
+            if passed:
+                return True, details
+        return False, []
+    if node_type == "condition":
+        alias = str(node.get("entity") or "").strip()
+        if not alias or alias not in context:
+            return False, []
+        record_entry = context[alias]
+        record = record_entry.get("record") if isinstance(record_entry, dict) else None
+        field_name = str(node.get("field") or "").strip()
+        operator = str(node.get("operator") or "").strip()
+        if not isinstance(record, dict) or not field_name or operator not in _ALERT_OPERATORS:
+            return False, []
+        value_type = str(node.get("valueType") or "value").lower()
+        left_value = record.get(field_name)
+        if value_type == "entity":
+            target_alias = str(node.get("targetEntity") or "").strip()
+            target_field = str(node.get("targetField") or "").strip()
+            if (
+                operator not in _ADVANCED_ENTITY_COMPARISON_OPERATORS
+                or not target_alias
+                or target_alias not in context
+                or not target_field
+            ):
+                return False, []
+            target_entry = context[target_alias]
+            target_record = target_entry.get("record") if isinstance(target_entry, dict) else None
+            if not isinstance(target_record, dict):
+                return False, []
+            right_value = target_record.get(target_field)
+            if not _compare_field_values(left_value, right_value, operator):
+                return False, []
+            details = [
+                {
+                    "entity": alias,
+                    "field": field_name,
+                    "operator": operator,
+                    "value": f"{target_alias}.{target_field}",
+                    "actual": _stringify_alert_value(left_value),
+                    "targetEntity": target_alias,
+                    "targetField": target_field,
+                    "targetActual": _stringify_alert_value(right_value),
+                    "role": "source",
+                },
+                {
+                    "entity": target_alias,
+                    "field": target_field,
+                    "operator": operator,
+                    "value": f"{alias}.{field_name}",
+                    "actual": _stringify_alert_value(right_value),
+                    "targetEntity": alias,
+                    "targetField": field_name,
+                    "targetActual": _stringify_alert_value(left_value),
+                    "role": "target",
+                },
+            ]
+            return True, details
+        target_value = node.get("value") if operator not in _ALERT_VALUELESS_OPERATORS else None
+        if isinstance(target_value, str):
+            target_str = target_value
+        elif target_value is None:
+            target_str = None
+        else:
+            target_str = str(target_value)
+        if not _matches_alert_condition(left_value, operator, target_str):
+            return False, []
+        detail = {
+            "entity": alias,
+            "field": field_name,
+            "operator": operator,
+            "value": target_str,
+            "actual": _stringify_alert_value(left_value),
+            "role": "value",
+        }
+        return True, [detail]
+    return False, []
+
+
+def _evaluate_advanced_alert(
+    alert: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+) -> List[Dict[str, object]]:
+    definition = alert.get("definition") if isinstance(alert.get("definition"), dict) else None
+    if not definition:
+        return []
+    raw_entities = definition.get("entities") if isinstance(definition.get("entities"), list) else []
+    logic = definition.get("logic") if isinstance(definition.get("logic"), dict) else None
+    if not raw_entities or not logic:
+        return []
+    entities, entity_lookup = _build_advanced_entity_lookup(raw_entities)
+    if not entities or not entity_lookup:
+        return []
+    contexts = _enumerate_advanced_contexts(entities, account_pair, records_by_object)
+    if not contexts:
+        return []
+    matches: List[Dict[str, object]] = []
+    for context in contexts:
+        passed, details = _evaluate_advanced_node(logic, context)
+        if not passed or not details:
+            continue
+        details_by_alias: Dict[str, List[Dict[str, object]]] = {}
+        for detail in details:
+            alias = detail.get("entity")
+            if not isinstance(alias, str) or alias not in context:
+                continue
+            details_by_alias.setdefault(alias, []).append(detail)
+        for alias, detail_list in details_by_alias.items():
+            entity = entity_lookup.get(alias)
+            record_entry = context.get(alias)
+            if not entity or not record_entry:
+                continue
+            record = record_entry.get("record") if isinstance(record_entry, dict) else None
+            record_key = record_entry.get("key") if isinstance(record_entry, dict) else None
+            if not isinstance(record, dict) or not isinstance(record_key, str):
+                continue
+            record_id = record.get("Id")
+            fields: List[Dict[str, object]] = []
+            for detail in detail_list:
+                field_name = detail.get("field")
+                operator = detail.get("operator")
+                if not isinstance(field_name, str) or not isinstance(operator, str):
+                    continue
+                filter_value = detail.get("value")
+                if isinstance(filter_value, str):
+                    filter_text = filter_value
+                elif filter_value is None:
+                    filter_text = ""
+                else:
+                    filter_text = str(filter_value)
+                target_actual = detail.get("targetActual")
+                if target_actual not in (None, ""):
+                    filter_text = f"{filter_text} [{target_actual}]" if filter_text else str(target_actual)
+                fields.append(
+                    {
+                        "name": f"{alias}.{field_name}",
+                        "operator": operator,
+                        "filterValue": filter_text,
+                        "actualValue": detail.get("actual"),
+                    }
+                )
+            if not fields:
+                continue
+            match_entry = {
+                "object": entity.get("object"),
+                "alias": alias,
+                "recordKey": record_key,
+                "recordId": str(record_id) if record_id else None,
+                "fields": fields,
+            }
+            matches.append(match_entry)
+    return matches
+
+
 def _evaluate_alert_filters_for_record(
     record: Dict[str, object], filters: Sequence[Dict[str, object]]
 ) -> Optional[List[Dict[str, object]]]:
@@ -999,44 +1465,56 @@ def _evaluate_alerts_for_account(
     for alert in alerts:
         if not isinstance(alert, dict):
             continue
-        filters_payload = alert.get("filters")
-        if not isinstance(filters_payload, list) or not filters_payload:
-            continue
-        grouped_filters: Dict[str, List[Dict[str, object]]] = {}
-        for filter_definition in filters_payload:
-            object_key = filter_definition.get("object")
-            if not isinstance(object_key, str) or not object_key:
+        mode = alert.get("mode") if isinstance(alert.get("mode"), str) else _BASIC_ALERT_MODE
+        filters_payload = alert.get("filters") if isinstance(alert.get("filters"), list) else []
+        alert_matches: List[Dict[str, object]]
+        if mode == _ADVANCED_ALERT_MODE:
+            alert_matches = _evaluate_advanced_alert(alert, account_pair, records_by_object)
+        else:
+            if not filters_payload:
                 continue
-            grouped_filters.setdefault(object_key, []).append(filter_definition)
-        if not grouped_filters:
-            continue
-        alert_matches: List[Dict[str, object]] = []
-        alert_failed = False
-        for object_key, object_filters in grouped_filters.items():
-            if object_key == "Account":
-                candidate_records = [account_pair]
-            else:
-                candidate_records = records_by_object.get(object_key, [])
-            object_matches: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
-            for record_key, record in candidate_records:
-                matches = _evaluate_alert_filters_for_record(record, object_filters)
-                if matches is not None:
-                    object_matches.append((record_key, record, matches))
-            if not object_matches:
-                alert_failed = True
-                break
-            for record_key, record, matches in object_matches:
-                record_id = record.get("Id") if isinstance(record, dict) else None
-                record_id_str = str(record_id) if record_id else None
-                alert_matches.append(
-                    {
-                        "object": object_key,
-                        "recordId": record_id_str,
-                        "recordKey": record_key,
-                        "fields": matches,
-                    }
-                )
-        if alert_failed or not alert_matches:
+            grouped_filters: Dict[str, List[Dict[str, object]]] = {}
+            for filter_definition in filters_payload:
+                object_key = filter_definition.get("object")
+                if not isinstance(object_key, str) or not object_key:
+                    continue
+                grouped_filters.setdefault(object_key, []).append(filter_definition)
+            if not grouped_filters:
+                continue
+            alert_matches = []
+            alert_failed = False
+            for object_key, object_filters in grouped_filters.items():
+                if object_key == "Account":
+                    candidate_records = [account_pair]
+                else:
+                    candidate_records = records_by_object.get(object_key, [])
+                object_matches: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
+                for record_key, record in candidate_records:
+                    matches = _evaluate_alert_filters_for_record(record, object_filters)
+                    if matches is None:
+                        alert_failed = True
+                        break
+                    if matches:
+                        object_matches.append((record_key, record, matches))
+                if alert_failed:
+                    break
+                if not object_matches:
+                    alert_failed = True
+                    break
+                for record_key, record, matches in object_matches:
+                    record_id = record.get("Id") if isinstance(record, dict) else None
+                    record_id_str = str(record_id) if record_id else None
+                    alert_matches.append(
+                        {
+                            "object": object_key,
+                            "recordId": record_id_str,
+                            "recordKey": record_key,
+                            "fields": matches,
+                        }
+                    )
+            if alert_failed:
+                continue
+        if not alert_matches:
             continue
         alert_id = str(alert.get("id") or uuid.uuid4())
         label = str(alert.get("label") or "").strip() or alert_id
@@ -1044,6 +1522,7 @@ def _evaluate_alerts_for_account(
             "id": alert_id,
             "label": label,
             "filters": [dict(item) for item in filters_payload if isinstance(item, dict)],
+            "mode": mode,
             "matches": alert_matches,
         }
         triggered_alerts.append(alert_entry)
@@ -1087,13 +1566,23 @@ def _evaluate_alerts_for_account(
 def _get_alert_object_keys(alerts: Sequence[Dict[str, object]]) -> Set[str]:
     object_keys: Set[str] = set()
     for alert in alerts or []:
-        filters = alert.get("filters") if isinstance(alert, dict) else None
-        if not isinstance(filters, list):
+        if not isinstance(alert, dict):
             continue
+        filters = alert.get("filters") if isinstance(alert.get("filters"), list) else []
         for filter_definition in filters:
             object_key = filter_definition.get("object") if isinstance(filter_definition, dict) else None
             if isinstance(object_key, str) and object_key:
                 object_keys.add(object_key)
+        if str(alert.get("mode")) == _ADVANCED_ALERT_MODE:
+            definition = alert.get("definition") if isinstance(alert.get("definition"), dict) else None
+            if definition:
+                entities = definition.get("entities") if isinstance(definition.get("entities"), list) else []
+                for entity in entities:
+                    if not isinstance(entity, dict):
+                        continue
+                    object_key = entity.get("object")
+                    if isinstance(object_key, str) and object_key and object_key != "Account":
+                        object_keys.add(object_key)
     return object_keys
 
 
