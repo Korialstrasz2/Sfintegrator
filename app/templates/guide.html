@@ -49,6 +49,18 @@
       </ol>
     {% endif %}
 
+    {% if sections.get('account_explorer_alerts') %}
+      <h5 id="account-explorer-alerts">{{ sections['account_explorer_alerts']['title'] }}</h5>
+      {% if sections['account_explorer_alerts'].get('description') %}
+        <p class="text-muted">{{ sections['account_explorer_alerts']['description']|safe }}</p>
+      {% endif %}
+      <ol>
+        {% for step in sections['account_explorer_alerts']['steps'] %}
+          <li>{{ step|safe }}</li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+
     <div class="alert alert-info mt-4">
       <strong>{{ guide['tip']['title'] }}</strong> {{ guide['tip']['content']|safe }}
     </div>
