@@ -124,10 +124,59 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 }
 
 
+def _sanitize_alert_definitions(raw: object) -> List[Dict[str, object]]:
+    alerts: List[Dict[str, object]] = []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return alerts
+    seen_ids: Set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        expression_raw = item.get("expression")
+        if not isinstance(expression_raw, str):
+            continue
+        expression = expression_raw.strip()
+        if not expression:
+            continue
+        object_raw = item.get("object")
+        object_key = object_raw.strip() if isinstance(object_raw, str) else "Account"
+        if object_key not in _OBJECT_DEFINITIONS:
+            object_key = "Account"
+        label_raw = item.get("label")
+        label = label_raw.strip() if isinstance(label_raw, str) else ""
+        message_raw = item.get("message")
+        message = message_raw.strip() if isinstance(message_raw, str) else ""
+        enabled = bool(item.get("enabled", True))
+        alert_id_raw = item.get("id")
+        if isinstance(alert_id_raw, str) and alert_id_raw.strip():
+            alert_id = alert_id_raw.strip()
+        else:
+            alert_id = uuid.uuid4().hex
+        if alert_id in seen_ids:
+            alert_id = uuid.uuid4().hex
+        seen_ids.add(alert_id)
+        if not label:
+            label = f"{_OBJECT_DEFINITIONS.get(object_key, {}).get('label', object_key)} alert"
+        if not message:
+            message = label
+        alerts.append(
+            {
+                "id": alert_id,
+                "label": label,
+                "message": message,
+                "object": object_key,
+                "expression": expression,
+                "enabled": enabled,
+            }
+        )
+    return alerts
+
+
 @dataclass
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
     objects: List[Dict[str, object]] = field(default_factory=list)
+    alerts: List[Dict[str, object]] = field(default_factory=list)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
 
@@ -151,6 +200,18 @@ class ExplorerConfig:
                 {"key": str(item.get("key")), "hidden": bool(item.get("hidden"))}
                 for item in self.objects
                 if isinstance(item, dict) and item.get("key")
+            ],
+            "alerts": [
+                {
+                    "id": alert.get("id"),
+                    "label": alert.get("label"),
+                    "message": alert.get("message"),
+                    "object": alert.get("object"),
+                    "expression": alert.get("expression"),
+                    "enabled": bool(alert.get("enabled", True)),
+                }
+                for alert in self.alerts
+                if isinstance(alert, dict) and alert.get("expression")
             ],
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
@@ -302,12 +363,16 @@ def get_session() -> ExplorerSession:
 
 def get_config() -> ExplorerConfig:
     if not CONFIG_FILE.exists():
-        return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+        return ExplorerConfig(
+            fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None
+        )
     with _config_lock:
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return ExplorerConfig(fields={}, objects=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None)
+            return ExplorerConfig(
+                fields={}, objects=[], alerts=[], view_mode=_DEFAULT_VIEW_MODE, updated_at=None
+            )
         fields = data.get("fields") if isinstance(data, dict) else {}
         if not isinstance(fields, dict):
             fields = {}
@@ -341,9 +406,12 @@ def get_config() -> ExplorerConfig:
         if view_mode not in _VALID_VIEW_MODES:
             view_mode = _DEFAULT_VIEW_MODE
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
+        alerts_payload = data.get("alerts") if isinstance(data, dict) else []
+        alerts = _sanitize_alert_definitions(alerts_payload)
         return ExplorerConfig(
             fields=result,
             objects=objects,
+            alerts=alerts,
             view_mode=view_mode,
             updated_at=updated_at,
         )
@@ -356,6 +424,18 @@ def save_config(config: ExplorerConfig) -> None:
             {"key": item["key"], "hidden": bool(item.get("hidden"))}
             for item in config.objects
             if isinstance(item, dict) and item.get("key")
+        ],
+        "alerts": [
+            {
+                "id": alert.get("id"),
+                "label": alert.get("label"),
+                "message": alert.get("message"),
+                "object": alert.get("object"),
+                "expression": alert.get("expression"),
+                "enabled": bool(alert.get("enabled", True)),
+            }
+            for alert in config.alerts
+            if isinstance(alert, dict) and alert.get("expression")
         ],
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
@@ -371,6 +451,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     existing = get_config()
     sanitized_fields: Dict[str, List[str]] = dict(existing.fields)
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
+    sanitized_alerts: List[Dict[str, object]] = list(existing.alerts)
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
 
     fields_payload = payload.get("fields") if "fields" in payload else None
@@ -409,6 +490,10 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
             seen.add(key)
         sanitized_objects = objects
 
+    alerts_payload = payload.get("alerts") if "alerts" in payload else None
+    if alerts_payload is not None:
+        sanitized_alerts = _sanitize_alert_definitions(alerts_payload)
+
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -420,6 +505,7 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     config = ExplorerConfig(
         fields=sanitized_fields,
         objects=sanitized_objects,
+        alerts=sanitized_alerts,
         view_mode=view_mode,
         updated_at=timestamp,
     )
