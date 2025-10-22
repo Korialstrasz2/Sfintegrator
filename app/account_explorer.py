@@ -37,6 +37,10 @@ _ALERT_OPERATORS: Dict[str, str] = {
 
 _ALERT_VALUELESS_OPERATORS: Set[str] = {"blank", "not_blank", "null", "not_null"}
 
+_ADVANCED_GROUP_LOGIC: Set[str] = {"and", "or"}
+_ADVANCED_SCOPE_MATCHES: Set[str] = {"any", "all", "none", "not_all"}
+_ADVANCED_AGGREGATE_OPERATIONS: Set[str] = {"duplicates"}
+
 
 def _sanitize_contact_point_sources(raw: object) -> Dict[str, Dict[str, bool]]:
     sanitized: Dict[str, Dict[str, bool]] = {}
@@ -57,6 +61,107 @@ def _sanitize_contact_point_sources(raw: object) -> Dict[str, Dict[str, bool]]:
     return sanitized
 
 
+def _sanitize_advanced_node(node: object) -> Optional[Dict[str, object]]:
+    if not isinstance(node, dict):
+        return None
+    node_type = str(node.get("type") or "").strip().lower()
+    if node_type == "group":
+        logic = str(node.get("logic") or "and").strip().lower()
+        if logic not in _ADVANCED_GROUP_LOGIC:
+            logic = "and"
+        children_payload = node.get("children") if isinstance(node.get("children"), list) else []
+        children: List[Dict[str, object]] = []
+        for child in children_payload:
+            sanitized_child = _sanitize_advanced_node(child)
+            if sanitized_child:
+                children.append(sanitized_child)
+        if not children:
+            return None
+        return {"type": "group", "logic": logic, "children": children}
+    if node_type == "condition":
+        object_key = str(node.get("object") or "").strip()
+        field_name = str(node.get("field") or "").strip()
+        operator = str(node.get("operator") or "").strip()
+        if not object_key or not field_name or operator not in _ALERT_OPERATORS:
+            return None
+        entry: Dict[str, object] = {
+            "type": "condition",
+            "object": object_key,
+            "field": field_name,
+            "operator": operator,
+        }
+        if operator not in _ALERT_VALUELESS_OPERATORS:
+            value = node.get("value")
+            if not isinstance(value, str):
+                value = str(value) if value is not None else ""
+            value = value.strip()
+            if not value:
+                return None
+            entry["value"] = value
+        return entry
+    if node_type == "scope":
+        object_key = str(node.get("object") or "").strip()
+        match = str(node.get("match") or "").strip().lower()
+        if not object_key or match not in _ADVANCED_SCOPE_MATCHES:
+            return None
+        children_payload = node.get("children") if isinstance(node.get("children"), list) else []
+        children: List[Dict[str, object]] = []
+        for child in children_payload:
+            sanitized_child = _sanitize_advanced_node(child)
+            if not sanitized_child:
+                continue
+            if sanitized_child.get("type") == "scope":
+                continue
+            if sanitized_child.get("type") not in {"condition", "group"}:
+                continue
+            children.append(sanitized_child)
+        if not children:
+            return None
+        return {"type": "scope", "object": object_key, "match": match, "children": children}
+    if node_type == "aggregate":
+        operation = str(node.get("operation") or "").strip().lower()
+        if operation not in _ADVANCED_AGGREGATE_OPERATIONS:
+            return None
+        object_key = str(node.get("object") or "").strip()
+        if not object_key:
+            return None
+        if operation == "duplicates":
+            field_name = str(node.get("field") or "").strip()
+            if not field_name:
+                return None
+            min_count_raw = node.get("minCount")
+            try:
+                min_count = int(min_count_raw)
+            except (TypeError, ValueError):
+                min_count = 2
+            if min_count < 2:
+                min_count = 2
+            entry = {
+                "type": "aggregate",
+                "operation": "duplicates",
+                "object": object_key,
+                "field": field_name,
+                "minCount": min_count,
+            }
+            distinct_field = node.get("distinctField")
+            if isinstance(distinct_field, str) and distinct_field.strip():
+                entry["distinctField"] = distinct_field.strip()
+            criteria_payload = node.get("criteria") if isinstance(node.get("criteria"), dict) else None
+            if criteria_payload:
+                criteria = _sanitize_advanced_node(criteria_payload)
+                if criteria and criteria.get("type") in {"condition", "group"}:
+                    entry["criteria"] = criteria
+            return entry
+    return None
+
+
+def _sanitize_advanced_alert_definition(raw: object) -> Optional[Dict[str, object]]:
+    if not isinstance(raw, dict):
+        return None
+    sanitized = _sanitize_advanced_node(raw)
+    return sanitized
+
+
 def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, object]]:
     sanitized: List[Dict[str, object]] = []
     seen_ids: Set[str] = set()
@@ -67,6 +172,23 @@ def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, 
         if alert_id in seen_ids:
             continue
         label = str(alert.get("label") or "").strip()
+        mode_raw = alert.get("mode")
+        mode = str(mode_raw or "").strip().lower() if isinstance(mode_raw, str) else ""
+        advanced_payload = alert.get("advanced") if isinstance(alert.get("advanced"), dict) else None
+        if mode == "advanced" or advanced_payload:
+            advanced_definition = _sanitize_advanced_alert_definition(advanced_payload or alert.get("advanced"))
+            if not advanced_definition:
+                continue
+            sanitized.append(
+                {
+                    "id": alert_id,
+                    "label": label or alert_id,
+                    "mode": "advanced",
+                    "advanced": advanced_definition,
+                }
+            )
+            seen_ids.add(alert_id)
+            continue
         filters_payload = alert.get("filters") if isinstance(alert.get("filters"), list) else []
         filters: List[Dict[str, object]] = []
         for item in filters_payload:
@@ -323,6 +445,21 @@ class ExplorerSession:
 
     def serialize(self) -> Dict[str, object]:
         return {"result": self.result.to_dict() if self.result else None}
+
+
+@dataclass
+class AdvancedMatch:
+    object_key: str
+    record_key: str
+    record: Dict[str, object]
+    fields: List[Dict[str, object]] = field(default_factory=list)
+    message: Optional[str] = None
+
+
+@dataclass
+class AdvancedEvaluationResult:
+    passed: bool
+    matches: List[AdvancedMatch] = field(default_factory=list)
 
 
 _config_lock = threading.Lock()
@@ -983,6 +1120,393 @@ def _evaluate_alert_filters_for_record(
     return matched_fields
 
 
+def _convert_advanced_matches(matches: Sequence[AdvancedMatch]) -> List[Dict[str, object]]:
+    merged: Dict[Tuple[str, str], AdvancedMatch] = {}
+    for match in matches or []:
+        if not isinstance(match, AdvancedMatch):
+            continue
+        object_key = match.object_key or "Account"
+        record_key = match.record_key or ""
+        if not record_key:
+            continue
+        key = (object_key, record_key)
+        if key not in merged:
+            merged[key] = AdvancedMatch(
+                object_key=object_key,
+                record_key=record_key,
+                record=match.record,
+                fields=list(match.fields or []),
+                message=match.message,
+            )
+        else:
+            merged[key].fields.extend(match.fields or [])
+            if match.message:
+                if merged[key].message and match.message not in merged[key].message:
+                    merged[key].message = f"{merged[key].message}; {match.message}"
+                elif not merged[key].message:
+                    merged[key].message = match.message
+    converted: List[Dict[str, object]] = []
+    for combined in merged.values():
+        record = combined.record if isinstance(combined.record, dict) else {}
+        record_id = record.get("Id") if isinstance(record, dict) else None
+        if record_id is not None and not isinstance(record_id, str):
+            record_id = str(record_id)
+        fields_payload: List[Dict[str, object]] = []
+        for field_entry in combined.fields:
+            if not isinstance(field_entry, dict):
+                continue
+            name = str(field_entry.get("name") or "")
+            operator = str(field_entry.get("operator") or "")
+            filter_value = field_entry.get("filterValue")
+            if filter_value is not None and not isinstance(filter_value, str):
+                filter_value = str(filter_value)
+            actual_value = field_entry.get("actualValue")
+            actual_value_str = _stringify_alert_value(actual_value)
+            entry: Dict[str, object] = {
+                "name": name,
+                "operator": operator,
+                "filterValue": filter_value,
+                "actualValue": actual_value_str,
+            }
+            if "matched" in field_entry:
+                entry["matched"] = bool(field_entry.get("matched"))
+            if "message" in field_entry and field_entry.get("message"):
+                entry["message"] = str(field_entry.get("message"))
+            fields_payload.append(entry)
+        converted_entry: Dict[str, object] = {
+            "object": combined.object_key,
+            "recordId": record_id,
+            "recordKey": combined.record_key,
+            "fields": fields_payload,
+        }
+        if combined.message:
+            converted_entry["message"] = combined.message
+        converted.append(converted_entry)
+    return converted
+
+
+def _format_scope_summary_message(object_key: str, match: str) -> str:
+    if match == "any":
+        return f"At least one {object_key} record matched the criteria."
+    if match == "all":
+        return f"All {object_key} records matched the criteria."
+    if match == "not_all":
+        return f"At least one {object_key} record failed the criteria."
+    if match == "none":
+        return f"No {object_key} records matched the criteria."
+    return ""
+
+
+def _iter_records_for_object(
+    object_key: str,
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+) -> List[Tuple[str, Dict[str, object]]]:
+    if object_key == "Account":
+        return [account_pair]
+    return records_by_object.get(object_key, [])
+
+
+def _evaluate_advanced_condition(
+    node: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+    context: Optional[Tuple[str, str, Dict[str, object]]],
+) -> AdvancedEvaluationResult:
+    if not context:
+        return AdvancedEvaluationResult(False, [])
+    context_object, record_key, record = context
+    node_object = node.get("object")
+    if context_object != node_object or not isinstance(record, dict):
+        return AdvancedEvaluationResult(False, [])
+    field_name = node.get("field")
+    operator = node.get("operator")
+    if not isinstance(field_name, str) or not isinstance(operator, str):
+        return AdvancedEvaluationResult(False, [])
+    target = node.get("value") if operator not in _ALERT_VALUELESS_OPERATORS else None
+    target_str = target if isinstance(target, str) else (str(target) if target is not None else None)
+    value = record.get(field_name)
+    matched = _matches_alert_condition(value, operator, target_str)
+    field_entry: Dict[str, object] = {
+        "name": field_name,
+        "operator": operator,
+        "filterValue": target_str,
+        "actualValue": value,
+        "matched": matched,
+    }
+    return AdvancedEvaluationResult(
+        matched,
+        [AdvancedMatch(context_object, record_key, record, [field_entry])],
+    )
+
+
+def _evaluate_advanced_group(
+    node: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+    context: Optional[Tuple[str, str, Dict[str, object]]],
+) -> AdvancedEvaluationResult:
+    logic = node.get("logic") if isinstance(node.get("logic"), str) else "and"
+    children = node.get("children") if isinstance(node.get("children"), list) else []
+    matches: List[AdvancedMatch] = []
+    if logic == "or":
+        passed = False
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            result = _evaluate_advanced_node(child, account_pair, records_by_object, context)
+            matches.extend(result.matches)
+            if result.passed:
+                passed = True
+        return AdvancedEvaluationResult(passed, matches)
+    passed = True
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        result = _evaluate_advanced_node(child, account_pair, records_by_object, context)
+        matches.extend(result.matches)
+        if not result.passed:
+            passed = False
+    return AdvancedEvaluationResult(passed, matches)
+
+
+def _evaluate_advanced_scope(
+    node: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+    context: Optional[Tuple[str, str, Dict[str, object]]],
+) -> AdvancedEvaluationResult:
+    object_key = node.get("object") if isinstance(node.get("object"), str) else ""
+    match_type = node.get("match") if isinstance(node.get("match"), str) else "any"
+    children = node.get("children") if isinstance(node.get("children"), list) else []
+    records = _iter_records_for_object(object_key, account_pair, records_by_object)
+    record_results: List[Tuple[str, Dict[str, object], bool, List[AdvancedMatch]]] = []
+    for record_key, record in records:
+        record_context = (object_key, record_key, record)
+        record_matches: List[AdvancedMatch] = []
+        record_passed = True
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            result = _evaluate_advanced_node(child, account_pair, records_by_object, record_context)
+            record_matches.extend(result.matches)
+            if not result.passed:
+                record_passed = False
+        record_results.append((record_key, record, record_passed, record_matches))
+    matches: List[AdvancedMatch] = []
+    if match_type == "any":
+        passed = any(item[2] for item in record_results)
+        if passed:
+            for record_key, record, record_passed, record_matches in record_results:
+                if not record_passed:
+                    continue
+                if record_matches:
+                    matches.extend(record_matches)
+                else:
+                    matches.append(AdvancedMatch(object_key, record_key, record, []))
+    elif match_type == "all":
+        passed = bool(record_results) and all(item[2] for item in record_results)
+        if passed:
+            for record_key, record, _, record_matches in record_results:
+                if record_matches:
+                    matches.extend(record_matches)
+                else:
+                    matches.append(AdvancedMatch(object_key, record_key, record, []))
+    elif match_type == "none":
+        passed = not any(item[2] for item in record_results)
+        if passed:
+            summary = _format_scope_summary_message(object_key, match_type)
+            if summary:
+                matches.append(
+                    AdvancedMatch(
+                        "Account",
+                        account_pair[0],
+                        account_pair[1],
+                        [
+                            {
+                                "name": object_key,
+                                "operator": match_type,
+                                "filterValue": None,
+                                "actualValue": summary,
+                                "matched": True,
+                                "message": summary,
+                            }
+                        ],
+                        message=summary,
+                    )
+                )
+    elif match_type == "not_all":
+        passed = bool(record_results) and any(not item[2] for item in record_results)
+        if passed:
+            for record_key, record, record_passed, record_matches in record_results:
+                if record_passed:
+                    continue
+                if record_matches:
+                    matches.extend(record_matches)
+                else:
+                    matches.append(AdvancedMatch(object_key, record_key, record, []))
+    else:
+        passed = False
+    if passed and not matches and match_type != "none":
+        summary = _format_scope_summary_message(object_key, match_type)
+        if summary:
+            matches.append(
+                AdvancedMatch(
+                    "Account",
+                    account_pair[0],
+                    account_pair[1],
+                    [
+                        {
+                            "name": object_key,
+                            "operator": match_type,
+                            "filterValue": None,
+                            "actualValue": summary,
+                            "matched": True,
+                            "message": summary,
+                        }
+                    ],
+                    message=summary,
+                )
+            )
+    return AdvancedEvaluationResult(passed, matches)
+
+
+def _evaluate_advanced_aggregate(
+    node: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+    context: Optional[Tuple[str, str, Dict[str, object]]],
+) -> AdvancedEvaluationResult:
+    object_key = node.get("object") if isinstance(node.get("object"), str) else ""
+    operation = node.get("operation") if isinstance(node.get("operation"), str) else ""
+    if operation != "duplicates":
+        return AdvancedEvaluationResult(False, [])
+    field_name = node.get("field") if isinstance(node.get("field"), str) else ""
+    if not object_key or not field_name:
+        return AdvancedEvaluationResult(False, [])
+    min_count = node.get("minCount")
+    try:
+        min_count_value = int(min_count)
+    except (TypeError, ValueError):
+        min_count_value = 2
+    if min_count_value < 2:
+        min_count_value = 2
+    distinct_field = node.get("distinctField") if isinstance(node.get("distinctField"), str) else ""
+    records = _iter_records_for_object(object_key, account_pair, records_by_object)
+    if not records:
+        return AdvancedEvaluationResult(False, [])
+    criteria_node = node.get("criteria") if isinstance(node.get("criteria"), dict) else None
+    filtered: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
+    for record_key, record in records:
+        if not isinstance(record, dict):
+            continue
+        criteria_fields: List[Dict[str, object]] = []
+        if criteria_node:
+            result = _evaluate_advanced_node(
+                criteria_node,
+                account_pair,
+                records_by_object,
+                (object_key, record_key, record),
+            )
+            if not result.passed:
+                continue
+            for match in result.matches:
+                if isinstance(match, AdvancedMatch) and match.fields:
+                    criteria_fields.extend(match.fields)
+        filtered.append((record_key, record, criteria_fields))
+    if not filtered:
+        return AdvancedEvaluationResult(False, [])
+    grouped: Dict[str, List[Tuple[str, Dict[str, object], List[Dict[str, object]]]]] = {}
+    for record_key, record, criteria_fields in filtered:
+        value = record.get(field_name)
+        if value is None:
+            continue
+        value_str = _stringify_alert_value(value)
+        if not value_str:
+            continue
+        grouped.setdefault(value_str, []).append((record_key, record, criteria_fields))
+    matches: List[AdvancedMatch] = []
+    passed = False
+    for group_value, entries in grouped.items():
+        if len(entries) < min_count_value:
+            continue
+        if distinct_field:
+            distinct_values: Set[str] = set()
+            for _, record, _ in entries:
+                distinct_value = record.get(distinct_field)
+                if distinct_value is None:
+                    continue
+                distinct_str = _stringify_alert_value(distinct_value)
+                if distinct_str:
+                    distinct_values.add(distinct_str)
+            if len(distinct_values) < 2:
+                continue
+        passed = True
+        message = (
+            f"{len(entries)} {object_key} records share {field_name} '{group_value}'"
+        )
+        for record_key, record, criteria_fields in entries:
+            field_entries: List[Dict[str, object]] = []
+            for criteria_field in criteria_fields:
+                if isinstance(criteria_field, dict):
+                    field_entries.append(dict(criteria_field))
+            field_entries.append(
+                {
+                    "name": field_name,
+                    "operator": "duplicates",
+                    "filterValue": group_value,
+                    "actualValue": record.get(field_name),
+                    "matched": True,
+                }
+            )
+            if distinct_field:
+                field_entries.append(
+                    {
+                        "name": distinct_field,
+                        "operator": "distinct",
+                        "filterValue": None,
+                        "actualValue": record.get(distinct_field),
+                        "matched": True,
+                    }
+                )
+            matches.append(AdvancedMatch(object_key, record_key, record, field_entries, message=message))
+    if not passed:
+        return AdvancedEvaluationResult(False, [])
+    return AdvancedEvaluationResult(True, matches)
+
+
+def _evaluate_advanced_node(
+    node: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+    context: Optional[Tuple[str, str, Dict[str, object]]],
+) -> AdvancedEvaluationResult:
+    if not isinstance(node, dict):
+        return AdvancedEvaluationResult(False, [])
+    node_type = node.get("type")
+    if node_type == "condition":
+        return _evaluate_advanced_condition(node, account_pair, records_by_object, context)
+    if node_type == "group":
+        return _evaluate_advanced_group(node, account_pair, records_by_object, context)
+    if node_type == "scope":
+        return _evaluate_advanced_scope(node, account_pair, records_by_object, context)
+    if node_type == "aggregate":
+        return _evaluate_advanced_aggregate(node, account_pair, records_by_object, context)
+    return AdvancedEvaluationResult(False, [])
+
+
+def _evaluate_advanced_alert(
+    advanced_definition: Dict[str, object],
+    account_pair: Tuple[str, Dict[str, object]],
+    records_by_object: MutableMapping[str, List[Tuple[str, Dict[str, object]]]],
+) -> List[Dict[str, object]]:
+    context = ("Account", account_pair[0], account_pair[1])
+    result = _evaluate_advanced_node(advanced_definition, account_pair, records_by_object, context)
+    if not result.passed:
+        return []
+    return _convert_advanced_matches(result.matches)
+
+
 def _evaluate_alerts_for_account(
     alerts: Sequence[Dict[str, object]],
     account_pair: Tuple[str, Dict[str, object]],
@@ -999,53 +1523,72 @@ def _evaluate_alerts_for_account(
     for alert in alerts:
         if not isinstance(alert, dict):
             continue
-        filters_payload = alert.get("filters")
-        if not isinstance(filters_payload, list) or not filters_payload:
-            continue
-        grouped_filters: Dict[str, List[Dict[str, object]]] = {}
-        for filter_definition in filters_payload:
-            object_key = filter_definition.get("object")
-            if not isinstance(object_key, str) or not object_key:
-                continue
-            grouped_filters.setdefault(object_key, []).append(filter_definition)
-        if not grouped_filters:
-            continue
+        mode = str(alert.get("mode") or "").strip().lower()
         alert_matches: List[Dict[str, object]] = []
-        alert_failed = False
-        for object_key, object_filters in grouped_filters.items():
-            if object_key == "Account":
-                candidate_records = [account_pair]
-            else:
-                candidate_records = records_by_object.get(object_key, [])
-            object_matches: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
-            for record_key, record in candidate_records:
-                matches = _evaluate_alert_filters_for_record(record, object_filters)
-                if matches is not None:
-                    object_matches.append((record_key, record, matches))
-            if not object_matches:
-                alert_failed = True
-                break
-            for record_key, record, matches in object_matches:
-                record_id = record.get("Id") if isinstance(record, dict) else None
-                record_id_str = str(record_id) if record_id else None
-                alert_matches.append(
-                    {
-                        "object": object_key,
-                        "recordId": record_id_str,
-                        "recordKey": record_key,
-                        "fields": matches,
-                    }
-                )
-        if alert_failed or not alert_matches:
-            continue
+        filters_payload = alert.get("filters")
+        if mode == "advanced":
+            advanced_definition = alert.get("advanced") if isinstance(alert.get("advanced"), dict) else None
+            if not advanced_definition:
+                continue
+            alert_matches = _evaluate_advanced_alert(advanced_definition, account_pair, records_by_object)
+            if not alert_matches:
+                continue
+        else:
+            if not isinstance(filters_payload, list) or not filters_payload:
+                continue
+            grouped_filters: Dict[str, List[Dict[str, object]]] = {}
+            for filter_definition in filters_payload:
+                object_key = filter_definition.get("object")
+                if not isinstance(object_key, str) or not object_key:
+                    continue
+                grouped_filters.setdefault(object_key, []).append(filter_definition)
+            if not grouped_filters:
+                continue
+            alert_failed = False
+            for object_key, object_filters in grouped_filters.items():
+                if object_key == "Account":
+                    candidate_records = [account_pair]
+                else:
+                    candidate_records = records_by_object.get(object_key, [])
+                object_matches: List[Tuple[str, Dict[str, object], List[Dict[str, object]]]] = []
+                for record_key, record in candidate_records:
+                    matches = _evaluate_alert_filters_for_record(record, object_filters)
+                    if matches is not None:
+                        object_matches.append((record_key, record, matches))
+                if not object_matches:
+                    alert_failed = True
+                    break
+                for record_key, record, matches in object_matches:
+                    record_id = record.get("Id") if isinstance(record, dict) else None
+                    record_id_str = str(record_id) if record_id else None
+                    alert_matches.append(
+                        {
+                            "object": object_key,
+                            "recordId": record_id_str,
+                            "recordKey": record_key,
+                            "fields": matches,
+                        }
+                    )
+            if alert_failed or not alert_matches:
+                continue
         alert_id = str(alert.get("id") or uuid.uuid4())
         label = str(alert.get("label") or "").strip() or alert_id
-        alert_entry = {
-            "id": alert_id,
-            "label": label,
-            "filters": [dict(item) for item in filters_payload if isinstance(item, dict)],
-            "matches": alert_matches,
-        }
+        if mode == "advanced":
+            alert_entry = {
+                "id": alert_id,
+                "label": label,
+                "mode": "advanced",
+                "advanced": dict(alert.get("advanced")) if isinstance(alert.get("advanced"), dict) else {},
+                "matches": alert_matches,
+            }
+        else:
+            alert_entry = {
+                "id": alert_id,
+                "label": label,
+                "mode": "simple",
+                "filters": [dict(item) for item in filters_payload if isinstance(item, dict)],
+                "matches": alert_matches,
+            }
         triggered_alerts.append(alert_entry)
         for match in alert_matches:
             object_key = match.get("object")
@@ -1084,10 +1627,47 @@ def _evaluate_alerts_for_account(
     return triggered_alerts, record_alert_details, field_alert_details
 
 
+def _collect_objects_from_advanced(node: object, accumulator: Set[str]) -> None:
+    if not isinstance(node, dict):
+        return
+    node_type = node.get("type")
+    if node_type == "condition":
+        object_key = node.get("object")
+        if isinstance(object_key, str) and object_key:
+            accumulator.add(object_key)
+        return
+    if node_type == "scope":
+        object_key = node.get("object")
+        if isinstance(object_key, str) and object_key:
+            accumulator.add(object_key)
+        for child in node.get("children") if isinstance(node.get("children"), list) else []:
+            _collect_objects_from_advanced(child, accumulator)
+        return
+    if node_type == "group":
+        for child in node.get("children") if isinstance(node.get("children"), list) else []:
+            _collect_objects_from_advanced(child, accumulator)
+        return
+    if node_type == "aggregate":
+        object_key = node.get("object")
+        if isinstance(object_key, str) and object_key:
+            accumulator.add(object_key)
+        criteria = node.get("criteria")
+        if isinstance(criteria, dict):
+            _collect_objects_from_advanced(criteria, accumulator)
+
+
 def _get_alert_object_keys(alerts: Sequence[Dict[str, object]]) -> Set[str]:
     object_keys: Set[str] = set()
     for alert in alerts or []:
-        filters = alert.get("filters") if isinstance(alert, dict) else None
+        if not isinstance(alert, dict):
+            continue
+        mode = str(alert.get("mode") or "").strip().lower()
+        if mode == "advanced":
+            advanced_definition = alert.get("advanced") if isinstance(alert.get("advanced"), dict) else None
+            if advanced_definition:
+                _collect_objects_from_advanced(advanced_definition, object_keys)
+            continue
+        filters = alert.get("filters") if isinstance(alert.get("filters"), list) else None
         if not isinstance(filters, list):
             continue
         for filter_definition in filters:
