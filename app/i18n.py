@@ -985,10 +985,31 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def get_frontend_translations(language: str) -> Dict[str, Any]:
-    base = deepcopy(_LANGUAGE_PACKS[DEFAULT_LANGUAGE].get("frontend", {}))
+    base_pack = _LANGUAGE_PACKS.get(DEFAULT_LANGUAGE, {})
+    frontend = deepcopy(base_pack.get("frontend", {}))
+
+    extra_sections = ("account_explorer", "settings")
+    for key in extra_sections:
+        value = base_pack.get(key)
+        if isinstance(value, dict):
+            frontend[key] = deepcopy(value)
+
     if language == DEFAULT_LANGUAGE:
-        return base
+        return frontend
+
     language_pack = _LANGUAGE_PACKS.get(language, {})
-    frontend = language_pack.get("frontend", {})
-    return _deep_merge(base, frontend)
+
+    frontend_override = language_pack.get("frontend")
+    if isinstance(frontend_override, dict):
+        frontend = _deep_merge(frontend, deepcopy(frontend_override))
+
+    for key in extra_sections:
+        override = language_pack.get(key)
+        if isinstance(override, dict):
+            existing = frontend.get(key, {})
+            if not isinstance(existing, dict):
+                existing = {}
+            frontend[key] = _deep_merge(existing, deepcopy(override))
+
+    return frontend
 
