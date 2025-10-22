@@ -49,30 +49,6 @@
     return isoString;
   }
 
-  function insertTextAtCursor(textarea, text) {
-    if (!textarea || typeof text !== "string") {
-      return;
-    }
-    const value = textarea.value || "";
-    const start = textarea.selectionStart ?? value.length;
-    const end = textarea.selectionEnd ?? start;
-    const before = value.slice(0, start);
-    const after = value.slice(end);
-    textarea.value = `${before}${text}${after}`;
-    const caret = start + text.length;
-    if (typeof textarea.setSelectionRange === "function") {
-      textarea.setSelectionRange(caret, caret);
-    }
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  function generateAlertId() {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-      return crypto.randomUUID();
-    }
-    return `alert-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
-  }
-
   function normalizeObjectDefinitions(raw) {
     if (!Array.isArray(raw)) {
       return [];
@@ -179,7 +155,6 @@
     const accountFields = document.getElementById("account-explorer-account-fields");
     const accountRelated = document.getElementById("account-explorer-related");
     const accountEmpty = document.getElementById("account-explorer-account-empty");
-    const accountAlertsContainer = document.getElementById("account-explorer-account-alerts");
     const treeViewContainer = document.getElementById("account-explorer-tree-view");
     const treeToolbar = document.getElementById("account-explorer-tree-toolbar");
     const treeContent = document.getElementById("account-explorer-tree-content");
@@ -196,8 +171,6 @@
     const setupObjectList = document.getElementById("account-explorer-setup-object-list");
     const setupFieldsContainer = document.getElementById("account-explorer-setup-fields");
     const setupOrgSelect = document.getElementById("account-explorer-setup-org");
-    const setupAlertsContainer = document.getElementById("account-explorer-setup-alerts");
-    const setupAlertAddButton = document.getElementById("account-explorer-setup-alert-add");
     const setupViewInputs = Array.from(
       document.querySelectorAll('input[name="account-explorer-setup-view"]')
     );
@@ -222,20 +195,12 @@
       configState.viewMode = DEFAULT_VIEW_MODE;
     }
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
-    configState.alerts = Array.isArray(configState.alerts)
-      ? configState.alerts
-          .map((entry) => normalizeAlertConfig(entry))
-          .filter(Boolean)
-      : [];
 
     let setupObjectsState = [];
     let setupViewMode = currentViewMode;
-    let setupAlertsState = [];
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
-    const alertFieldDatalists = new Map();
     const fieldCache = new Map();
-    let activeTooltips = [];
 
     function isObjectVisible(key) {
       const definition = objectDefinitions.find((item) => item.key === key);
@@ -252,157 +217,6 @@
 
     function getVisibleObjects() {
       return objectDefinitions.filter((item) => !item.hidden);
-    }
-
-    function getAlertObjectOptions() {
-      const options = [
-        {
-          key: "Account",
-          label: translateKey("account_explorer.results.account_label"),
-        },
-      ];
-      const seen = new Set(options.map((item) => item.key));
-      objectDefinitions.forEach((definition) => {
-        if (!definition || !definition.key || seen.has(definition.key)) {
-          return;
-        }
-        options.push({ key: definition.key, label: definition.label || definition.key });
-        seen.add(definition.key);
-      });
-      return options;
-    }
-
-    function normalizeAlertConfig(raw) {
-      if (!raw || typeof raw !== "object") {
-        return null;
-      }
-      const id = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : generateAlertId();
-      const objectValue =
-        typeof raw.object === "string"
-          ? raw.object
-          : typeof raw.objectKey === "string"
-          ? raw.objectKey
-          : "";
-      let objectKey = "";
-      if (objectValue) {
-        const options = getAlertObjectOptions();
-        const match = options.find((option) => option.key.toLowerCase() === objectValue.toLowerCase());
-        if (match) {
-          objectKey = match.key;
-        }
-      }
-      const label = typeof raw.label === "string" ? raw.label.trim() : "";
-      const expression = typeof raw.expression === "string" ? raw.expression : "";
-      const description = typeof raw.description === "string" ? raw.description : "";
-      return {
-        id,
-        label,
-        object: objectKey,
-        expression,
-        description,
-      };
-    }
-
-    function formatAlertTooltip(alert) {
-      if (!alert) {
-        return "";
-      }
-      const label = alert.label || alert.id || "";
-      const description = alert.description ? ` — ${alert.description}` : "";
-      return `${label}${description}`;
-    }
-
-    function createAlertBadgeList(alerts, { showDescription = false, compact = false } = {}) {
-      const list = Array.isArray(alerts) ? alerts : [];
-      const container = document.createElement("div");
-      container.className = "account-alert-badges";
-      if (compact) {
-        container.classList.add("account-alert-badges--compact");
-      }
-      list.forEach((alert) => {
-        if (!alert) {
-          return;
-        }
-        const item = document.createElement("div");
-        item.className = "account-alert-badge";
-        const badge = document.createElement("span");
-        badge.className = "badge bg-danger";
-        badge.textContent = alert.label || alert.id || translateKey("account_explorer.alerts.unnamed");
-        item.appendChild(badge);
-        if (showDescription && alert.description) {
-          const text = document.createElement("span");
-          text.className = "account-alert-badge__description";
-          text.textContent = alert.description;
-          item.appendChild(text);
-        }
-        item.setAttribute("data-bs-toggle", "tooltip");
-        item.setAttribute("data-bs-placement", "top");
-        item.setAttribute("title", formatAlertTooltip(alert));
-        container.appendChild(item);
-      });
-      return container;
-    }
-
-    function renderAccountAlerts(alerts) {
-      if (!accountAlertsContainer) {
-        return;
-      }
-      accountAlertsContainer.innerHTML = "";
-      const list = Array.isArray(alerts) ? alerts : [];
-      if (!list.length) {
-        accountAlertsContainer.classList.add("d-none");
-        return;
-      }
-      accountAlertsContainer.classList.remove("d-none");
-      const heading = document.createElement("div");
-      heading.className = "account-alerts-heading";
-      heading.textContent = translateKey("account_explorer.results.alerts_heading");
-      accountAlertsContainer.appendChild(heading);
-      const badges = createAlertBadgeList(list, { showDescription: true });
-      accountAlertsContainer.appendChild(badges);
-      refreshTooltips(accountAlertsContainer);
-    }
-
-    function disposeTooltips() {
-      if (!activeTooltips.length) {
-        return;
-      }
-      activeTooltips.forEach((tooltip) => {
-        if (tooltip && typeof tooltip.dispose === "function") {
-          tooltip.dispose();
-        }
-      });
-      activeTooltips = [];
-    }
-
-    function refreshTooltips(root) {
-      if (typeof bootstrap === "undefined" || !bootstrap.Tooltip) {
-        return;
-      }
-      const context = root || document;
-      if (root && activeTooltips.length) {
-        activeTooltips = activeTooltips.filter((tooltip) => {
-          const element = tooltip && (tooltip._element || tooltip.element);
-          if (!element) {
-            return false;
-          }
-          if (context.contains(element)) {
-            if (typeof tooltip.dispose === "function") {
-              tooltip.dispose();
-            }
-            return false;
-          }
-          return true;
-        });
-      }
-      const elements = context.querySelectorAll('[data-bs-toggle="tooltip"]');
-      const tooltips = [];
-      elements.forEach((element) => {
-        tooltips.push(new bootstrap.Tooltip(element));
-      });
-      if (tooltips.length) {
-        activeTooltips.push(...tooltips);
-      }
     }
 
     function updateRunState() {
@@ -638,23 +452,26 @@
             if (!record) {
               return;
             }
-            const card = createRecordCard(record, key);
+            const card = document.createElement("div");
+            card.className = "border rounded p-2 mb-2";
+            const badge = document.createElement("div");
+            badge.className = "badge bg-light text-secondary mb-2";
+            badge.textContent = record.id || translateKey("account_explorer.results.no_id");
+            card.appendChild(badge);
+            const dl = document.createElement("dl");
+            dl.className = "row mb-0 small";
+            renderFieldList(dl, record.fields || []);
+            card.appendChild(dl);
             section.appendChild(card);
           });
         }
         container.appendChild(section);
-        refreshTooltips(section);
       });
     }
 
     function createRecordCard(record, objectKey) {
       const card = document.createElement("div");
-      const alerts = Array.isArray(record.alerts) ? record.alerts : [];
-      const cardClasses = ["border", "rounded", "p-2", "mb-2"];
-      if (alerts.length) {
-        cardClasses.push("account-alert-card");
-      }
-      card.className = cardClasses.join(" ");
+      card.className = "border rounded p-2 mb-2";
       const header = document.createElement("div");
       header.className = "d-flex justify-content-between align-items-start mb-2";
       const title = document.createElement("div");
@@ -667,14 +484,6 @@
         badge.className = "badge bg-light text-secondary";
         badge.textContent = recordId;
         header.appendChild(badge);
-      }
-      if (alerts.length) {
-        const alertsContainer = createAlertBadgeList(alerts, { compact: true });
-        alertsContainer.classList.add("mb-2");
-        card.setAttribute("data-bs-toggle", "tooltip");
-        card.setAttribute("data-bs-placement", "top");
-        card.setAttribute("title", alerts.map((alert) => formatAlertTooltip(alert)).join("\n"));
-        card.appendChild(alertsContainer);
       }
       card.appendChild(header);
       const dl = document.createElement("dl");
@@ -745,15 +554,6 @@
         meta.className = "account-tree-node__meta";
         meta.textContent = recordId;
         node.appendChild(meta);
-      }
-      const alerts = Array.isArray(record.alerts) ? record.alerts : [];
-      if (alerts.length) {
-        node.classList.add("account-alert-node");
-        node.setAttribute("data-bs-toggle", "tooltip");
-        node.setAttribute("data-bs-placement", "top");
-        node.setAttribute("title", alerts.map((alert) => formatAlertTooltip(alert)).join("\n"));
-        const badges = createAlertBadgeList(alerts, { compact: true });
-        node.appendChild(badges);
       }
       if (showFields) {
         const fieldsContainer = document.createElement("div");
@@ -979,13 +779,6 @@
         meta.textContent = account.id;
         header.appendChild(meta);
       }
-      const alerts = Array.isArray(account.alerts) ? account.alerts : [];
-      if (alerts.length) {
-        title.classList.add("account-alert-heading");
-        const badges = createAlertBadgeList(alerts, { showDescription: true });
-        badges.classList.add("account-tree-header__alerts");
-        header.appendChild(badges);
-      }
       return header;
     }
 
@@ -1108,7 +901,6 @@
       const diagram = buildAccountTreeDiagram(account, context);
       treeContent.appendChild(diagram);
       treeContent.scrollLeft = 0;
-      refreshTooltips(treeContent);
 
       latestTreeAccount = account;
       latestTreeContext = context;
@@ -1242,17 +1034,12 @@
       if (!account) {
         accountDetails.classList.add("d-none");
         accountEmpty.classList.remove("d-none");
-        renderAccountAlerts([]);
-        accountHeading.classList.remove("account-alert-heading");
         return;
       }
       accountEmpty.classList.add("d-none");
       accountDetails.classList.remove("d-none");
       accountHeading.textContent = getAccountDisplayName(account) || account.id;
       renderFieldList(accountFields, account.fields || []);
-      const accountAlerts = Array.isArray(account.alerts) ? account.alerts : [];
-      renderAccountAlerts(accountAlerts);
-      accountHeading.classList.toggle("account-alert-heading", accountAlerts.length > 0);
       renderRelatedSection(accountRelated, account.related || {});
     }
 
@@ -1328,13 +1115,11 @@
       resultsPlaceholder.classList.add("d-none");
       resultsContainer.classList.remove("d-none");
       const accounts = result.data.accounts;
-      disposeTooltips();
       accountList.innerHTML = "";
       accounts.forEach((account) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.className =
-          "list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-2";
+        button.className = "list-group-item list-group-item-action";
         button.dataset.accountId = account.id;
         const title = document.createElement("div");
         title.className = "fw-semibold";
@@ -1342,36 +1127,13 @@
         const subtitle = document.createElement("div");
         subtitle.className = "small text-muted";
         subtitle.textContent = account.id;
-        const content = document.createElement("div");
-        content.className = "flex-grow-1 account-list-item__content";
-        content.appendChild(title);
-        content.appendChild(subtitle);
-        button.appendChild(content);
-        const accountAlerts = Array.isArray(account.alerts) ? account.alerts : [];
-        if (accountAlerts.length) {
-          button.classList.add("account-alert-list-item");
-          button.setAttribute("data-bs-toggle", "tooltip");
-          button.setAttribute("data-bs-placement", "right");
-          button.setAttribute(
-            "title",
-            accountAlerts.map((alert) => formatAlertTooltip(alert)).join("\n")
-          );
-          const badgeContainer = document.createElement("div");
-          badgeContainer.className = "account-alert-list-badges d-flex flex-column align-items-end";
-          const badge = document.createElement("span");
-          badge.className = "badge bg-danger";
-          badge.textContent = translateKey("account_explorer.alerts.badge_short", {
-            count: accountAlerts.length,
-          });
-          badgeContainer.appendChild(badge);
-          button.appendChild(badgeContainer);
-        }
+        button.appendChild(title);
+        button.appendChild(subtitle);
         button.addEventListener("click", () => {
           renderAccount(account.id);
         });
         accountList.appendChild(button);
       });
-      refreshTooltips(accountList);
       if (!selectedAccountId || !accounts.some((item) => item.id === selectedAccountId)) {
         selectedAccountId = accounts[0]?.id || null;
       }
@@ -1412,7 +1174,6 @@
       }
       updateRunState();
       setViewMode(currentViewMode, { force: true });
-      refreshTooltips(resultsContainer);
     }
 
     function handleParseResponse(data) {
@@ -1602,18 +1363,17 @@
       return payload;
     }
 
-    function getFieldsForObject(objectKey) {
-      if (!objectKey) {
-        return Promise.resolve([]);
-      }
+    function ensureObjectFieldsLoaded(objectKey) {
       if (!setupOrgSelect || !setupOrgSelect.value) {
-        return Promise.reject(new Error("no-org"));
+        showToast(translateKey("frontend.account_explorer.no_org"), "warning");
+        return;
       }
       const cacheKey = `${setupOrgSelect.value}:${objectKey}`;
       if (fieldCache.has(cacheKey)) {
-        return Promise.resolve(fieldCache.get(cacheKey));
+        fillDatalist(objectKey, fieldCache.get(cacheKey));
+        return;
       }
-      return fetch(
+      fetch(
         `/api/account-explorer/fields?org_id=${encodeURIComponent(
           setupOrgSelect.value
         )}&object=${encodeURIComponent(objectKey)}`
@@ -1629,63 +1389,27 @@
           }
           const fields = Array.isArray(data?.fields) ? data.fields : [];
           fieldCache.set(cacheKey, fields);
-          return fields;
-        });
-    }
-
-    function ensureObjectFieldsLoaded(objectKey) {
-      if (!objectKey) {
-        return;
-      }
-      getFieldsForObject(objectKey)
-        .then((fields) => {
           fillDatalist(objectKey, fields);
         })
-        .catch((error) => {
-          if (error instanceof Error && error.message === "no-org") {
-            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
-            return;
-          }
+        .catch(() => {
           showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
         });
     }
 
-    function renderFieldOptionsInDatalist(datalist, fields) {
+    function fillDatalist(objectKey, fields) {
+      const datalist = setupFieldDatalists.get(objectKey);
       if (!datalist) {
         return;
       }
       datalist.innerHTML = "";
       fields.forEach((field) => {
         const option = document.createElement("option");
-        option.value = field?.name || "";
-        if (field?.label) {
+        option.value = field.name || "";
+        if (field.label) {
           option.label = `${field.label} (${field.name})`;
         }
         datalist.appendChild(option);
       });
-    }
-
-    function fillDatalist(objectKey, fields) {
-      const datalist = setupFieldDatalists.get(objectKey);
-      renderFieldOptionsInDatalist(datalist, fields);
-    }
-
-    function loadAlertFieldOptions(alertId, objectKey) {
-      if (!alertId || !objectKey) {
-        return;
-      }
-      getFieldsForObject(objectKey)
-        .then((fields) => {
-          const datalist = alertFieldDatalists.get(alertId);
-          renderFieldOptionsInDatalist(datalist, fields);
-        })
-        .catch((error) => {
-          if (error instanceof Error && error.message === "no-org") {
-            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
-            return;
-          }
-          showToast(translateKey("frontend.account_explorer.alerts.fields_failed"), "danger");
-        });
     }
 
     function renderSetupObjectList() {
@@ -1847,184 +1571,12 @@
       });
     }
 
-    function renderSetupAlerts() {
-      if (!setupAlertsContainer) {
-        return;
-      }
-      alertFieldDatalists.clear();
-      setupAlertsContainer.innerHTML = "";
-      if (!setupAlertsState.length) {
-        const empty = document.createElement("div");
-        empty.className = "text-muted small";
-        empty.textContent = translateKey("account_explorer.setup.alerts_empty");
-        setupAlertsContainer.appendChild(empty);
-        return;
-      }
-      setupAlertsState.forEach((alert, index) => {
-        const card = document.createElement("div");
-        card.className = "card account-alert-config";
-        card.dataset.alertId = alert.id;
-        const body = document.createElement("div");
-        body.className = "card-body";
-
-        const header = document.createElement("div");
-        header.className = "d-flex justify-content-between align-items-start mb-3 gap-2";
-        const title = document.createElement("h6");
-        title.className = "fw-semibold mb-0";
-        title.textContent = alert.label
-          ? alert.label
-          : translateKey("account_explorer.setup.alerts_default_title", { index: index + 1 });
-        header.appendChild(title);
-        const removeButton = document.createElement("button");
-        removeButton.type = "button";
-        removeButton.className = "btn btn-outline-danger btn-sm";
-        removeButton.dataset.action = "remove-alert";
-        removeButton.textContent = translateKey("account_explorer.setup.alerts_remove_button");
-        header.appendChild(removeButton);
-        body.appendChild(header);
-
-        const labelGroup = document.createElement("div");
-        labelGroup.className = "mb-3";
-        const labelLabel = document.createElement("label");
-        labelLabel.className = "form-label";
-        labelLabel.setAttribute("for", `account-explorer-alert-label-${alert.id}`);
-        labelLabel.textContent = translateKey("account_explorer.setup.alerts_label");
-        const labelInput = document.createElement("input");
-        labelInput.type = "text";
-        labelInput.className = "form-control";
-        labelInput.id = `account-explorer-alert-label-${alert.id}`;
-        labelInput.value = alert.label || "";
-        labelInput.dataset.field = "label";
-        labelGroup.appendChild(labelLabel);
-        labelGroup.appendChild(labelInput);
-        body.appendChild(labelGroup);
-
-        const objectGroup = document.createElement("div");
-        objectGroup.className = "mb-3";
-        const objectLabel = document.createElement("label");
-        objectLabel.className = "form-label";
-        objectLabel.setAttribute("for", `account-explorer-alert-object-${alert.id}`);
-        objectLabel.textContent = translateKey("account_explorer.setup.alerts_object_label");
-        const objectSelect = document.createElement("select");
-        objectSelect.className = "form-select";
-        objectSelect.id = `account-explorer-alert-object-${alert.id}`;
-        objectSelect.dataset.field = "object";
-        const placeholderOption = document.createElement("option");
-        placeholderOption.value = "";
-        placeholderOption.textContent = translateKey("account_explorer.setup.alerts_object_placeholder");
-        objectSelect.appendChild(placeholderOption);
-        getAlertObjectOptions().forEach((option) => {
-          const optionEl = document.createElement("option");
-          optionEl.value = option.key;
-          optionEl.textContent = option.label;
-          objectSelect.appendChild(optionEl);
-        });
-        objectSelect.value = alert.object || "";
-        objectGroup.appendChild(objectLabel);
-        objectGroup.appendChild(objectSelect);
-        const objectHelp = document.createElement("div");
-        objectHelp.className = "form-text";
-        objectHelp.textContent = translateKey("account_explorer.setup.alerts_object_help");
-        objectGroup.appendChild(objectHelp);
-        body.appendChild(objectGroup);
-
-        const descriptionGroup = document.createElement("div");
-        descriptionGroup.className = "mb-3";
-        const descriptionLabel = document.createElement("label");
-        descriptionLabel.className = "form-label";
-        descriptionLabel.setAttribute("for", `account-explorer-alert-description-${alert.id}`);
-        descriptionLabel.textContent = translateKey("account_explorer.setup.alerts_description_label");
-        const descriptionInput = document.createElement("input");
-        descriptionInput.type = "text";
-        descriptionInput.className = "form-control";
-        descriptionInput.id = `account-explorer-alert-description-${alert.id}`;
-        descriptionInput.value = alert.description || "";
-        descriptionInput.dataset.field = "description";
-        descriptionGroup.appendChild(descriptionLabel);
-        descriptionGroup.appendChild(descriptionInput);
-        body.appendChild(descriptionGroup);
-
-        const expressionGroup = document.createElement("div");
-        expressionGroup.className = "mb-3";
-        const expressionLabel = document.createElement("label");
-        expressionLabel.className = "form-label";
-        expressionLabel.setAttribute("for", `account-explorer-alert-expression-${alert.id}`);
-        expressionLabel.textContent = translateKey("account_explorer.setup.alerts_condition_label");
-        const expressionTextarea = document.createElement("textarea");
-        expressionTextarea.className = "form-control font-monospace";
-        expressionTextarea.id = `account-explorer-alert-expression-${alert.id}`;
-        expressionTextarea.rows = 3;
-        expressionTextarea.dataset.field = "expression";
-        expressionTextarea.value = alert.expression || "";
-        const expressionHelp = document.createElement("div");
-        expressionHelp.className = "form-text";
-        expressionHelp.textContent = translateKey("account_explorer.setup.alerts_condition_help");
-        expressionGroup.appendChild(expressionLabel);
-        expressionGroup.appendChild(expressionTextarea);
-        expressionGroup.appendChild(expressionHelp);
-        body.appendChild(expressionGroup);
-
-        const fieldGroup = document.createElement("div");
-        fieldGroup.className = "mb-3";
-        const fieldLabel = document.createElement("label");
-        fieldLabel.className = "form-label";
-        fieldLabel.setAttribute("for", `account-explorer-alert-field-${alert.id}`);
-        fieldLabel.textContent = translateKey("account_explorer.setup.alerts_field_label");
-        const inputGroup = document.createElement("div");
-        inputGroup.className = "input-group";
-        const fieldInput = document.createElement("input");
-        fieldInput.type = "text";
-        fieldInput.className = "form-control";
-        fieldInput.id = `account-explorer-alert-field-${alert.id}`;
-        fieldInput.placeholder = translateKey("account_explorer.setup.alerts_field_placeholder");
-        fieldInput.dataset.role = "alert-field-input";
-        fieldInput.setAttribute("list", `account-explorer-alert-fields-${alert.id}`);
-        const insertButton = document.createElement("button");
-        insertButton.type = "button";
-        insertButton.className = "btn btn-outline-secondary";
-        insertButton.dataset.action = "insert-field";
-        insertButton.textContent = translateKey("account_explorer.setup.alerts_insert_button");
-        inputGroup.appendChild(fieldInput);
-        inputGroup.appendChild(insertButton);
-        fieldGroup.appendChild(fieldLabel);
-        fieldGroup.appendChild(inputGroup);
-        const fieldHelp = document.createElement("div");
-        fieldHelp.className = "form-text";
-        fieldHelp.textContent = translateKey("account_explorer.setup.alerts_insert_help");
-        fieldGroup.appendChild(fieldHelp);
-        const datalist = document.createElement("datalist");
-        datalist.id = `account-explorer-alert-fields-${alert.id}`;
-        alertFieldDatalists.set(alert.id, datalist);
-        fieldGroup.appendChild(datalist);
-        body.appendChild(fieldGroup);
-
-        card.appendChild(body);
-        setupAlertsContainer.appendChild(card);
-        if (alert.object) {
-          loadAlertFieldOptions(alert.id, alert.object);
-        }
-      });
-    }
-
-    function gatherSetupAlerts() {
-      return setupAlertsState.map((alert) => ({
-        id: alert.id,
-        label: (alert.label || "").trim(),
-        object: alert.object || "",
-        expression: alert.expression || "",
-        description: (alert.description || "").trim(),
-      }));
-    }
-
-
     function openSetupModal() {
       setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
       setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
-      setupAlertsState = configState.alerts.map((item) => ({ ...item }));
       renderSetupObjectList();
       renderSetupFields();
       populateSetupFieldValues();
-      renderSetupAlerts();
       setupViewInputs.forEach((input) => {
         input.checked = input.value === setupViewMode;
       });
@@ -2044,7 +1596,6 @@
           hidden: Boolean(item.hidden),
         })),
         viewMode: setupViewMode,
-        alerts: gatherSetupAlerts(),
       };
       fetch("/api/account-explorer/config", {
         method: "POST",
@@ -2061,11 +1612,6 @@
             throw new Error("save_failed");
           }
           configState = data?.config ? { ...data.config } : configState;
-          configState.alerts = Array.isArray(configState.alerts)
-            ? configState.alerts
-                .map((entry) => normalizeAlertConfig(entry))
-                .filter(Boolean)
-            : [];
           objectDefinitions = normalizeObjectDefinitions(
             data?.connectedObjects || objectDefinitions
           );
@@ -2074,8 +1620,6 @@
           setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
           populateSetupFieldValues();
           renderSetupObjectList();
-          setupAlertsState = configState.alerts.map((item) => ({ ...item }));
-          renderSetupAlerts();
           setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
           setupViewInputs.forEach((input) => {
             input.checked = input.value === setupViewMode;
@@ -2197,7 +1741,6 @@
     if (setupOrgSelect) {
       setupOrgSelect.addEventListener("change", () => {
         fieldCache.clear();
-        renderSetupAlerts();
       });
     }
     setupViewInputs.forEach((input) => {
@@ -2207,148 +1750,6 @@
         }
       });
     });
-
-    if (setupAlertAddButton) {
-      setupAlertAddButton.addEventListener("click", () => {
-        const newAlert = {
-          id: generateAlertId(),
-          label: "",
-          object: "",
-          expression: "",
-          description: "",
-        };
-        setupAlertsState.push(newAlert);
-        renderSetupAlerts();
-      });
-    }
-
-    if (setupAlertsContainer) {
-      setupAlertsContainer.addEventListener("input", (event) => {
-        const target = event.target;
-        if (
-          !(
-            target instanceof HTMLInputElement ||
-            target instanceof HTMLTextAreaElement
-          )
-        ) {
-          return;
-        }
-        const card = target.closest("[data-alert-id]");
-        if (!card) {
-          return;
-        }
-        const alertId = card.dataset.alertId;
-        const alert = setupAlertsState.find((item) => item.id === alertId);
-        if (!alert) {
-          return;
-        }
-        if (target.dataset.field === "label") {
-          alert.label = target.value;
-          const title = card.querySelector("h6");
-          if (title) {
-            if (alert.label.trim()) {
-              title.textContent = alert.label.trim();
-            } else {
-              const index = setupAlertsState.findIndex((item) => item.id === alertId);
-              title.textContent = translateKey("account_explorer.setup.alerts_default_title", {
-                index: index + 1,
-              });
-            }
-          }
-        }
-        if (target.dataset.field === "description") {
-          alert.description = target.value;
-        }
-        if (target.dataset.field === "expression") {
-          alert.expression = target.value;
-        }
-      });
-
-      setupAlertsContainer.addEventListener("change", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLSelectElement)) {
-          return;
-        }
-        if (target.dataset.field !== "object") {
-          return;
-        }
-        const card = target.closest("[data-alert-id]");
-        if (!card) {
-          return;
-        }
-        const alertId = card.dataset.alertId;
-        const alert = setupAlertsState.find((item) => item.id === alertId);
-        if (!alert) {
-          return;
-        }
-        alert.object = target.value || "";
-        loadAlertFieldOptions(alert.id, alert.object);
-      });
-
-      setupAlertsContainer.addEventListener("focusin", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLInputElement)) {
-          return;
-        }
-        if (target.dataset.role !== "alert-field-input") {
-          return;
-        }
-        const card = target.closest("[data-alert-id]");
-        if (!card) {
-          return;
-        }
-        const alertId = card.dataset.alertId;
-        const alert = setupAlertsState.find((item) => item.id === alertId);
-        if (!alert || !alert.object) {
-          return;
-        }
-        loadAlertFieldOptions(alert.id, alert.object);
-      });
-
-      setupAlertsContainer.addEventListener("click", (event) => {
-        const button = event.target.closest("button[data-action]");
-        if (!button) {
-          return;
-        }
-        const card = button.closest("[data-alert-id]");
-        if (!card) {
-          return;
-        }
-        const alertId = card.dataset.alertId;
-        if (!alertId) {
-          return;
-        }
-        if (button.dataset.action === "remove-alert") {
-          setupAlertsState = setupAlertsState.filter((item) => item.id !== alertId);
-          renderSetupAlerts();
-          return;
-        }
-        if (button.dataset.action === "insert-field") {
-          const alert = setupAlertsState.find((item) => item.id === alertId);
-          if (!alert) {
-            return;
-          }
-          if (!alert.object) {
-            showToast(translateKey("frontend.account_explorer.alerts.no_object"), "warning");
-            return;
-          }
-          const fieldInput = card.querySelector('input[data-role="alert-field-input"]');
-          const expressionTextarea = card.querySelector('textarea[data-field="expression"]');
-          const fieldName = fieldInput ? fieldInput.value.trim() : "";
-          if (!fieldName) {
-            showToast(translateKey("frontend.account_explorer.alerts.no_field"), "warning");
-            return;
-          }
-          if (expressionTextarea instanceof HTMLTextAreaElement) {
-            const token = `${alert.object}.${fieldName}`;
-            insertTextAtCursor(expressionTextarea, token);
-          }
-          if (fieldInput instanceof HTMLInputElement) {
-            fieldInput.value = "";
-          }
-        }
-      });
-    }
 
     fetchOrgs();
 

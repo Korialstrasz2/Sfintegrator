@@ -196,82 +196,6 @@ body.theme-sci-fi {
   border-color: rgba(59, 130, 246, 0.35);
 }
 
-.account-alerts-heading {
-  font-size: 0.875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--bs-danger);
-}
-
-.account-alert-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  align-items: center;
-}
-
-.account-alert-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.account-alert-badge__description {
-  font-size: 0.85rem;
-  color: var(--bs-body-color);
-}
-
-.account-alert-badges--compact .account-alert-badge__description {
-  display: none;
-}
-
-.account-alert-heading {
-  color: var(--bs-danger);
-}
-
-.account-alert-card {
-  border-color: rgba(220, 53, 69, 0.35) !important;
-  background-color: rgba(220, 53, 69, 0.08);
-}
-
-.theme-dark .account-alert-card,
-.theme-sci-fi .account-alert-card {
-  background-color: rgba(220, 53, 69, 0.15);
-}
-
-.account-alert-list-item {
-  border-left: 0.25rem solid var(--bs-danger);
-}
-
-.account-alert-list-badges .badge {
-  min-width: 2rem;
-}
-
-.account-alert-config-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.account-alert-config {
-  border: 1px solid rgba(220, 53, 69, 0.2);
-}
-
-.account-alert-config .form-text {
-  color: var(--bs-secondary-color);
-}
-
-.theme-dark .account-alert-config,
-.theme-sci-fi .account-alert-config {
-  background-color: rgba(220, 53, 69, 0.1);
-  border-color: rgba(220, 53, 69, 0.35);
-}
-
-.account-tree-header__alerts {
-  margin-top: 0.5rem;
-}
-
 .account-tree-scroll {
   overflow-x: auto;
   overflow-y: hidden;
@@ -413,19 +337,6 @@ body.theme-sci-fi {
 .theme-sci-fi .account-tree-node {
   background-color: rgba(15, 23, 42, 0.9);
   box-shadow: 0 1.5rem 3.5rem rgba(15, 23, 42, 0.6);
-}
-
-.account-tree-node.account-alert-node {
-  border-color: rgba(220, 53, 69, 0.45);
-  box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.12);
-}
-
-.account-tree-node.account-alert-node .account-tree-node__title {
-  color: var(--bs-danger);
-}
-
-.account-tree-node.account-alert-node .account-alert-badges {
-  margin-top: 0.5rem;
 }
 
 .account-tree-node__badge {
