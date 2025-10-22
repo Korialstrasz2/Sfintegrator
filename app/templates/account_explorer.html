@@ -79,7 +79,6 @@
               <div id="account-explorer-list-view">
                 <div id="account-explorer-account-details" class="d-none">
                   <h6 class="fw-semibold" id="account-explorer-account-heading"></h6>
-                  <div class="mb-3 d-none" id="account-explorer-account-alerts"></div>
                   <div class="mb-3">
                     <h6 class="text-muted text-uppercase small">{{ t('account_explorer.results.fields_heading') }}</h6>
                     <dl class="row" id="account-explorer-account-fields"></dl>
@@ -180,27 +179,6 @@
                 {{ t('account_explorer.setup.view_options.tree') }}
               </label>
             </div>
-          </div>
-        </div>
-        <hr class="my-4" />
-        <div>
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="fw-semibold mb-0">{{ t('account_explorer.setup.alerts_title') }}</h6>
-            <a
-              class="small"
-              href="{{ url_for('main.guide') }}"
-              target="_blank"
-              rel="noopener"
-            >
-              {{ t('account_explorer.setup.alerts_guide') }}
-            </a>
-          </div>
-          <p class="text-muted small">{{ t('account_explorer.setup.alerts_help') }}</p>
-          <div class="d-flex flex-column gap-3" id="account-explorer-setup-alerts"></div>
-          <div class="d-grid">
-            <button type="button" class="btn btn-outline-primary btn-sm" id="account-explorer-setup-alert-add">
-              {{ t('account_explorer.setup.alerts_add') }}
-            </button>
           </div>
         </div>
       </div>
