@@ -375,9 +375,33 @@ body.theme-sci-fi {
   text-transform: uppercase;
 }
 
+.account-tree-node__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.account-tree-node__tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.6);
+  background: rgba(15, 23, 42, 0.1);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+}
+
 .theme-dark .account-tree-node__meta,
 .theme-sci-fi .account-tree-node__meta {
   color: rgba(226, 232, 240, 0.55);
+}
+
+.theme-dark .account-tree-node__tag,
+.theme-sci-fi .account-tree-node__tag {
+  color: rgba(226, 232, 240, 0.75);
+  background: rgba(148, 163, 184, 0.25);
 }
 
 .account-tree-node__fields {
