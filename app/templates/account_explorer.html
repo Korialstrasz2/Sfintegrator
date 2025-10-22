@@ -79,6 +79,7 @@
               <div id="account-explorer-list-view">
                 <div id="account-explorer-account-details" class="d-none">
                   <h6 class="fw-semibold" id="account-explorer-account-heading"></h6>
+                  <div id="account-explorer-account-alerts" class="mb-3 d-none"></div>
                   <div class="mb-3">
                     <h6 class="text-muted text-uppercase small">{{ t('account_explorer.results.fields_heading') }}</h6>
                     <dl class="row" id="account-explorer-account-fields"></dl>
@@ -149,6 +150,29 @@
               <div class="accordion" id="account-explorer-setup-fields"></div>
             </div>
           </div>
+        </div>
+        <hr class="my-4" />
+        <div>
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+              <h6 class="fw-semibold mb-1">{{ t('account_explorer.setup.alerts_title') }}</h6>
+              <p class="text-muted small mb-0">{{ t('account_explorer.setup.alerts_help') }}</p>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <a
+                class="btn btn-link btn-sm"
+                href="{{ url_for('main.guide') }}#account-explorer-alerts"
+                target="_blank"
+                rel="noopener"
+              >
+                {{ t('account_explorer.setup.alerts_guide_link') }}
+              </a>
+              <button class="btn btn-outline-primary btn-sm" type="button" id="account-explorer-setup-alert-add">
+                {{ t('account_explorer.setup.alerts_add_button') }}
+              </button>
+            </div>
+          </div>
+          <div class="account-alert-config-list" id="account-explorer-setup-alerts"></div>
         </div>
         <hr class="my-4" />
         <div>

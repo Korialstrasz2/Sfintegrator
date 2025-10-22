@@ -33,6 +33,29 @@
       {% endfor %}
     </ol>
 
+    {% if sections.get('account_explorer_alerts') %}
+      {% set alerts = sections['account_explorer_alerts'] %}
+      <h5 id="account-explorer-alerts">{{ alerts['title'] }}</h5>
+      {% if alerts.get('intro') %}
+        <p>{{ alerts['intro']|safe }}</p>
+      {% endif %}
+      {% if alerts.get('steps') %}
+        <ol>
+          {% for step in alerts['steps'] %}
+            <li>{{ step|safe }}</li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+      {% if alerts.get('examples') %}
+        <h6>{{ alerts['examples_title'] }}</h6>
+        <ul>
+          {% for example in alerts['examples'] %}
+            <li>{{ example|safe }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endif %}
+
     <h5>{{ sections['query']['title'] }}</h5>
     <ol>
       {% for step in sections['query']['steps'] %}
