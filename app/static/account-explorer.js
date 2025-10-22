@@ -2,21 +2,8 @@
   const DEFAULT_VIEW_MODE = "list";
   const VIEW_MODES = new Set(["list", "tree"]);
 
-  const CONTACT_LINK_FIELDS = ["ContactId", "Contact__c", "Contact"];
-  const INDIVIDUAL_LINK_FIELDS = ["ParentId", "IndividualId", "Individual__c"];
-  const CONTACT_POINT_OBJECTS = ["ContactPointPhone", "ContactPointEmail"];
-  const CONTACT_POINT_MODES = ["contact", "individual"];
-  const CONTACT_POINT_MODE_SET = new Set(CONTACT_POINT_MODES);
-  const CONTACT_POINT_MODE_OPTIONS = [
-    {
-      mode: "contact",
-      labelKey: "account_explorer.setup.contact_points.options.contact",
-    },
-    {
-      mode: "individual",
-      labelKey: "account_explorer.setup.contact_points.options.individual",
-    },
-  ];
+  const CONTACT_LINK_FIELDS = ["ContactId", "Contact__c", "Contact", "ParentId"];
+  const INDIVIDUAL_LINK_FIELDS = ["IndividualId", "Individual__c"];
 
   const ALERT_OPERATORS = [
     { value: "equals", labelKey: "account_explorer.setup.alerts.operators.equals", needsValue: true },
@@ -120,41 +107,6 @@
     const definitions = getObjectDefinitions();
     const definition = definitions.find((item) => item && item.key === key);
     return definition ? definition.label : key;
-  }
-
-  function createDefaultContactPointModeSet() {
-    return new Set(CONTACT_POINT_MODES);
-  }
-
-  function getConfiguredContactPointModes(objectKey) {
-    const mapping =
-      configState && typeof configState === "object"
-        ? configState.contactPointLinks
-        : null;
-    const rawModes =
-      mapping && Array.isArray(mapping[objectKey]) ? mapping[objectKey] : [];
-    const modes = new Set();
-    rawModes.forEach((mode) => {
-      if (typeof mode !== "string") {
-        return;
-      }
-      const normalized = mode.toLowerCase();
-      if (CONTACT_POINT_MODE_SET.has(normalized)) {
-        modes.add(normalized);
-      }
-    });
-    if (!modes.size) {
-      return createDefaultContactPointModeSet();
-    }
-    return modes;
-  }
-
-  function isContactPointModeEnabled(objectKey, mode) {
-    if (!CONTACT_POINT_MODE_SET.has(mode)) {
-      return false;
-    }
-    const modes = getConfiguredContactPointModes(objectKey);
-    return modes.has(mode);
   }
 
   function getFieldValue(fields, name) {
@@ -441,9 +393,6 @@
     );
     const setupAlertList = document.getElementById("account-explorer-setup-alert-list");
     const setupAlertAddButton = document.getElementById("account-explorer-setup-alert-add");
-    const setupContactPointsContainer = document.getElementById(
-      "account-explorer-setup-contact-points"
-    );
 
     if (!parseButton || !clearButton || !previewList || !orgSelect) {
       return;
@@ -467,12 +416,6 @@
     if (!Array.isArray(configState.alerts)) {
       configState.alerts = [];
     }
-    if (
-      !configState.contactPointLinks ||
-      typeof configState.contactPointLinks !== "object"
-    ) {
-      configState.contactPointLinks = {};
-    }
     let currentViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
 
     let setupObjectsState = [];
@@ -481,7 +424,6 @@
     const setupFieldInputs = new Map();
     const setupFieldDatalists = new Map();
     const fieldCache = new Map();
-    let setupContactPointLinks = new Map();
 
     function isObjectVisible(key) {
       const definition = objectDefinitions.find((item) => item.key === key);
@@ -905,35 +847,6 @@
         meta.textContent = recordId;
         node.appendChild(meta);
       }
-      if (
-        (objectKey === "ContactPointPhone" || objectKey === "ContactPointEmail") &&
-        Array.isArray(record.linkSources) &&
-        record.linkSources.length
-      ) {
-        const sourcesContainer = document.createElement("div");
-        sourcesContainer.className = "account-tree-node__sources";
-        record.linkSources.forEach((source) => {
-          if (!source || typeof source !== "object") {
-            return;
-          }
-          const linkType = typeof source.type === "string" ? source.type : "";
-          const fieldName = typeof source.field === "string" ? source.field : "";
-          if (!linkType || !fieldName) {
-            return;
-          }
-          const badge = document.createElement("span");
-          badge.className = "account-tree-node__source";
-          badge.classList.add(`account-tree-node__source--${linkType}`);
-          badge.textContent = translateKey(
-            `account_explorer.results.contact_point_sources.${linkType}`,
-            { field: fieldName }
-          );
-          sourcesContainer.appendChild(badge);
-        });
-        if (sourcesContainer.childElementCount) {
-          node.appendChild(sourcesContainer);
-        }
-      }
       if (showFields) {
         const fieldsContainer = document.createElement("div");
         fieldsContainer.className = "account-tree-node__fields";
@@ -1017,38 +930,16 @@
       }
       const mapping = forIndividual
         ? [
-            {
-              key: "ContactPointPhone",
-              records: context.contactPointPhonesByIndividual,
-              mode: "individual",
-            },
-            {
-              key: "ContactPointEmail",
-              records: context.contactPointEmailsByIndividual,
-              mode: "individual",
-            },
+            { key: "ContactPointPhone", records: context.contactPointPhonesByIndividual },
+            { key: "ContactPointEmail", records: context.contactPointEmailsByIndividual },
           ]
         : [
-            {
-              key: "ContactPointPhone",
-              records: context.contactPointPhonesByContact,
-              mode: "contact",
-            },
-            {
-              key: "ContactPointEmail",
-              records: context.contactPointEmailsByContact,
-              mode: "contact",
-            },
+            { key: "ContactPointPhone", records: context.contactPointPhonesByContact },
+            { key: "ContactPointEmail", records: context.contactPointEmailsByContact },
           ];
       const branches = [];
       mapping.forEach((entry) => {
         if (!context.isObjectVisible(entry.key)) {
-          return;
-        }
-        if (
-          typeof context.isContactPointModeEnabled === "function" &&
-          !context.isContactPointModeEnabled(entry.key, entry.mode)
-        ) {
           return;
         }
         const records = entry.records.get(recordId) || [];
@@ -1295,26 +1186,10 @@
       });
 
       const contactRelationsByContact = buildLinkMap(relations, CONTACT_LINK_FIELDS);
-      const contactPointModes = new Map();
-      CONTACT_POINT_OBJECTS.forEach((objectKey) => {
-        contactPointModes.set(objectKey, getConfiguredContactPointModes(objectKey));
-      });
-      const phoneModes = contactPointModes.get("ContactPointPhone") ||
-        createDefaultContactPointModeSet();
-      const emailModes = contactPointModes.get("ContactPointEmail") ||
-        createDefaultContactPointModeSet();
-      const contactPointPhonesByContact = phoneModes.has("contact")
-        ? buildLinkMap(phones, CONTACT_LINK_FIELDS)
-        : new Map();
-      const contactPointEmailsByContact = emailModes.has("contact")
-        ? buildLinkMap(emails, CONTACT_LINK_FIELDS)
-        : new Map();
-      const contactPointPhonesByIndividual = phoneModes.has("individual")
-        ? buildLinkMap(phones, INDIVIDUAL_LINK_FIELDS)
-        : new Map();
-      const contactPointEmailsByIndividual = emailModes.has("individual")
-        ? buildLinkMap(emails, INDIVIDUAL_LINK_FIELDS)
-        : new Map();
+      const contactPointPhonesByContact = buildLinkMap(phones, CONTACT_LINK_FIELDS);
+      const contactPointEmailsByContact = buildLinkMap(emails, CONTACT_LINK_FIELDS);
+      const contactPointPhonesByIndividual = buildLinkMap(phones, INDIVIDUAL_LINK_FIELDS);
+      const contactPointEmailsByIndividual = buildLinkMap(emails, INDIVIDUAL_LINK_FIELDS);
 
       const visibleDefinitions = getVisibleObjects().map((definition) => ({
         key: definition.key,
@@ -1331,11 +1206,6 @@
         contactPointPhonesByIndividual,
         contactPointEmailsByIndividual,
         visibleDefinitions,
-        contactPointModes,
-        isContactPointModeEnabled(objectKey, mode) {
-          const modes = contactPointModes.get(objectKey);
-          return modes ? modes.has(mode) : false;
-        },
       };
 
       const header = createTreeHeader(account);
@@ -1836,103 +1706,6 @@
         }
       });
       return payload;
-    }
-
-    function initializeContactPointLinkState() {
-      setupContactPointLinks = new Map();
-      CONTACT_POINT_OBJECTS.forEach((objectKey) => {
-        const configuredModes = getConfiguredContactPointModes(objectKey);
-        setupContactPointLinks.set(objectKey, new Set(configuredModes));
-      });
-    }
-
-    function renderSetupContactPointLinks() {
-      if (!setupContactPointsContainer) {
-        return;
-      }
-      setupContactPointsContainer.innerHTML = "";
-      CONTACT_POINT_OBJECTS.forEach((objectKey) => {
-        const selectedModes =
-          setupContactPointLinks.get(objectKey) instanceof Set
-            ? setupContactPointLinks.get(objectKey)
-            : createDefaultContactPointModeSet();
-        const col = document.createElement("div");
-        col.className = "col-md-6";
-        const card = document.createElement("div");
-        card.className = "border rounded p-3 h-100";
-        const title = document.createElement("h6");
-        title.className = "fw-semibold mb-2";
-        title.textContent = getObjectLabel(objectKey);
-        card.appendChild(title);
-        const optionsContainer = document.createElement("div");
-        optionsContainer.className = "d-flex flex-wrap gap-3";
-        CONTACT_POINT_MODE_OPTIONS.forEach(({ mode, labelKey }) => {
-          const formCheck = document.createElement("div");
-          formCheck.className = "form-check form-check-inline";
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.className = "form-check-input";
-          input.dataset.objectKey = objectKey;
-          input.dataset.mode = mode;
-          input.checked = selectedModes.has(mode);
-          const label = document.createElement("label");
-          label.className = "form-check-label";
-          label.textContent = translateKey(labelKey);
-          formCheck.appendChild(input);
-          formCheck.appendChild(label);
-          optionsContainer.appendChild(formCheck);
-        });
-        card.appendChild(optionsContainer);
-        col.appendChild(card);
-        setupContactPointsContainer.appendChild(col);
-      });
-    }
-
-    function gatherContactPointLinks() {
-      const payload = {};
-      CONTACT_POINT_OBJECTS.forEach((objectKey) => {
-        const modes = setupContactPointLinks.get(objectKey);
-        if (!(modes instanceof Set)) {
-          return;
-        }
-        const values = CONTACT_POINT_MODES.filter((mode) => modes.has(mode));
-        if (values.length) {
-          payload[objectKey] = values;
-        }
-      });
-      return payload;
-    }
-
-    function handleContactPointLinkChange(event) {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
-        return;
-      }
-      const objectKey = target.dataset.objectKey;
-      const mode = target.dataset.mode;
-      if (!objectKey || !mode || !CONTACT_POINT_MODE_SET.has(mode)) {
-        return;
-      }
-      let modes = setupContactPointLinks.get(objectKey);
-      if (!(modes instanceof Set)) {
-        modes = createDefaultContactPointModeSet();
-      }
-      if (target.checked) {
-        modes.add(mode);
-      } else {
-        modes.delete(mode);
-        if (!modes.size) {
-          modes.add(mode);
-          target.checked = true;
-          const message = translateKey(
-            "frontend.account_explorer.contact_points_required",
-            { object: getObjectLabel(objectKey) }
-          );
-          showToast(message, "warning");
-          return;
-        }
-      }
-      setupContactPointLinks.set(objectKey, modes);
     }
 
     function loadFieldsForObject(objectKey) {
@@ -2521,11 +2294,9 @@
       setupAlertsState = Array.isArray(configState.alerts)
         ? configState.alerts.map((alert) => cloneAlertState(alert))
         : [];
-      initializeContactPointLinkState();
       renderSetupObjectList();
       renderSetupFields();
       populateSetupFieldValues();
-      renderSetupContactPointLinks();
       renderSetupAlerts();
       setupViewInputs.forEach((input) => {
         input.checked = input.value === setupViewMode;
@@ -2547,7 +2318,6 @@
         })),
         viewMode: setupViewMode,
         alerts: gatherSetupAlerts(),
-        contactPointLinks: gatherContactPointLinks(),
       };
       fetch("/api/account-explorer/config", {
         method: "POST",
@@ -2570,19 +2340,11 @@
           if (!Array.isArray(configState.alerts)) {
             configState.alerts = [];
           }
-          if (
-            !configState.contactPointLinks ||
-            typeof configState.contactPointLinks !== "object"
-          ) {
-            configState.contactPointLinks = {};
-          }
           window.ACCOUNT_EXPLORER_CONFIG = configState;
           window.ACCOUNT_EXPLORER_OBJECTS = objectDefinitions;
           setupObjectsState = objectDefinitions.map((item) => ({ ...item }));
           populateSetupFieldValues();
           renderSetupObjectList();
-          initializeContactPointLinkState();
-          renderSetupContactPointLinks();
           setupAlertsState = configState.alerts.map((alert) => cloneAlertState(alert));
           renderSetupAlerts();
           setupViewMode = configState.viewMode || DEFAULT_VIEW_MODE;
@@ -2661,12 +2423,6 @@
       setupAlertList.addEventListener("click", handleAlertListClick);
       setupAlertList.addEventListener("change", handleAlertListChange);
       setupAlertList.addEventListener("input", handleAlertListInput);
-    }
-    if (setupContactPointsContainer) {
-      setupContactPointsContainer.addEventListener(
-        "change",
-        handleContactPointLinkChange
-      );
     }
     if (setupObjectList) {
       setupObjectList.addEventListener("click", (event) => {

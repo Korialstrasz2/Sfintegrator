@@ -153,15 +153,15 @@ _OBJECT_DEFINITIONS: Dict[str, Dict[str, object]] = {
     },
     "ContactPointPhone": {
         "label": "Contact Point Phone",
-        "required_fields": [],
+        "required_fields": ["Contact__c"],
         "contact_field": "Contact__c",
-        "individual_field": "ParentId",
+        "individual_field": None,
     },
     "ContactPointEmail": {
         "label": "Contact Point Email",
-        "required_fields": [],
+        "required_fields": ["Contact__c"],
         "contact_field": "Contact__c",
-        "individual_field": "ParentId",
+        "individual_field": None,
     },
 }
 
@@ -176,9 +176,6 @@ _DIRECT_OBJECTS: List[str] = [
 ]
 
 _CONTACT_POINT_OBJECTS: List[str] = ["ContactPointPhone", "ContactPointEmail"]
-
-_CONTACT_POINT_LINK_MODES: Set[str] = {"contact", "individual"}
-_CONTACT_POINT_MODE_ORDER: Tuple[str, ...] = ("contact", "individual")
 
 _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "Account": ["Name", "Type", "Industry", "BillingCity", "BillingCountry"],
@@ -201,67 +198,6 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
 }
 
 
-def _sanitize_contact_point_links(raw: object) -> Dict[str, List[str]]:
-    sanitized: Dict[str, List[str]] = {}
-    if not isinstance(raw, dict):
-        return sanitized
-    for object_key, values in raw.items():
-        if object_key not in _CONTACT_POINT_OBJECTS:
-            continue
-        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
-            continue
-        modes: List[str] = []
-        for value in values:
-            if not isinstance(value, str):
-                continue
-            normalized = value.strip().lower()
-            if normalized in _CONTACT_POINT_LINK_MODES and normalized not in modes:
-                modes.append(normalized)
-        if modes:
-            sanitized[object_key] = modes
-    return sanitized
-
-
-def _order_contact_point_modes(modes: Iterable[str]) -> List[str]:
-    ordered: List[str] = []
-    for mode in _CONTACT_POINT_MODE_ORDER:
-        if mode in modes and mode not in ordered:
-            ordered.append(mode)
-    return ordered
-
-
-def _resolve_contact_point_fields(
-    object_key: str, config: Optional["ExplorerConfig"] = None
-) -> Tuple[Optional[str], Optional[str]]:
-    definition = _OBJECT_DEFINITIONS.get(object_key, {})
-    contact_field_raw = definition.get("contact_field")
-    individual_field_raw = definition.get("individual_field")
-    contact_field = (
-        str(contact_field_raw)
-        if isinstance(contact_field_raw, str) and contact_field_raw
-        else None
-    )
-    individual_field = (
-        str(individual_field_raw)
-        if isinstance(individual_field_raw, str) and individual_field_raw
-        else None
-    )
-    if isinstance(contact_field, str) and contact_field.lower() == "none":
-        contact_field = None
-    if isinstance(individual_field, str) and individual_field.lower() == "none":
-        individual_field = None
-    if object_key in _CONTACT_POINT_OBJECTS:
-        if config is not None:
-            modes = config.get_contact_point_modes(object_key)
-        else:
-            modes = set(_CONTACT_POINT_LINK_MODES)
-        if "contact" not in modes:
-            contact_field = None
-        if "individual" not in modes:
-            individual_field = None
-    return contact_field, individual_field
-
-
 @dataclass
 class ExplorerConfig:
     fields: Dict[str, List[str]] = field(default_factory=dict)
@@ -269,7 +205,6 @@ class ExplorerConfig:
     alerts: List[Dict[str, object]] = field(default_factory=list)
     view_mode: str = _DEFAULT_VIEW_MODE
     updated_at: Optional[str] = None
-    contact_point_links: Dict[str, List[str]] = field(default_factory=dict)
 
     def get_fields(self, object_key: str) -> List[str]:
         values = self.fields.get(object_key) or _DEFAULT_FIELDS.get(object_key, [])
@@ -295,12 +230,6 @@ class ExplorerConfig:
             "alerts": self.get_alerts(),
             "viewMode": self.view_mode,
             "updatedAt": self.updated_at,
-            "contactPointLinks": {
-                object_key: _order_contact_point_modes(
-                    self.get_contact_point_modes(object_key)
-                )
-                for object_key in _CONTACT_POINT_OBJECTS
-            },
         }
 
     def get_objects(self) -> List[Dict[str, object]]:
@@ -326,17 +255,6 @@ class ExplorerConfig:
 
     def get_alerts(self) -> List[Dict[str, object]]:
         return _sanitize_alert_definitions(self.alerts)
-
-    def get_contact_point_modes(self, object_key: str) -> Set[str]:
-        raw_modes = self.contact_point_links.get(object_key, [])
-        sanitized = {
-            mode
-            for mode in raw_modes
-            if isinstance(mode, str) and mode in _CONTACT_POINT_LINK_MODES
-        }
-        if not sanitized:
-            return set(_CONTACT_POINT_LINK_MODES)
-        return sanitized
 
 
 @dataclass
@@ -504,17 +422,12 @@ def get_config() -> ExplorerConfig:
         updated_at = data.get("updatedAt") if isinstance(data, dict) else None
         alerts_payload = data.get("alerts") if isinstance(data, dict) else []
         alerts = _sanitize_alert_definitions(alerts_payload if isinstance(alerts_payload, Sequence) else [])
-        contact_point_links_raw = (
-            data.get("contactPointLinks") if isinstance(data, dict) else {}
-        )
-        contact_point_links = _sanitize_contact_point_links(contact_point_links_raw)
         return ExplorerConfig(
             fields=result,
             objects=objects,
             alerts=alerts,
             view_mode=view_mode,
             updated_at=updated_at,
-            contact_point_links=contact_point_links,
         )
 
 
@@ -529,12 +442,6 @@ def save_config(config: ExplorerConfig) -> None:
         "alerts": config.get_alerts(),
         "viewMode": config.view_mode,
         "updatedAt": config.updated_at,
-        "contactPointLinks": {
-            object_key: _order_contact_point_modes(
-                config.get_contact_point_modes(object_key)
-            )
-            for object_key in _CONTACT_POINT_OBJECTS
-        },
     }
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with _config_lock:
@@ -549,11 +456,6 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     sanitized_objects: List[Dict[str, object]] = list(existing.objects)
     sanitized_alerts: List[Dict[str, object]] = existing.get_alerts()
     view_mode = existing.view_mode if existing.view_mode in _VALID_VIEW_MODES else _DEFAULT_VIEW_MODE
-    sanitized_contact_point_links: Dict[str, List[str]] = {
-        key: list(values)
-        for key, values in existing.contact_point_links.items()
-        if isinstance(values, list)
-    }
 
     fields_payload = payload.get("fields") if "fields" in payload else None
     if isinstance(fields_payload, dict):
@@ -595,12 +497,6 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
     if isinstance(alerts_payload, Sequence) and not isinstance(alerts_payload, (str, bytes)):
         sanitized_alerts = _sanitize_alert_definitions(alerts_payload)
 
-    contact_point_payload = (
-        payload.get("contactPointLinks") if "contactPointLinks" in payload else None
-    )
-    if isinstance(contact_point_payload, dict):
-        sanitized_contact_point_links = _sanitize_contact_point_links(contact_point_payload)
-
     if "viewMode" in payload:
         raw_view_mode = payload.get("viewMode")
         if isinstance(raw_view_mode, str) and raw_view_mode in _VALID_VIEW_MODES:
@@ -615,7 +511,6 @@ def update_config(payload: Dict[str, object]) -> ExplorerConfig:
         alerts=sanitized_alerts,
         view_mode=view_mode,
         updated_at=timestamp,
-        contact_point_links=sanitized_contact_point_links,
     )
     save_config(config)
     return config
@@ -700,29 +595,13 @@ def _get_object_field_names(org: OrgConfig, object_key: str) -> Set[str]:
 
 def _build_query_fields(org: OrgConfig, object_key: str, config: ExplorerConfig) -> Tuple[List[str], List[str]]:
     definition = _OBJECT_DEFINITIONS.get(object_key, {})
-    required = [
-        field
-        for field in definition.get("required_fields", [])
-        if isinstance(field, str) and field
-    ]
-    contact_field, individual_field = _resolve_contact_point_fields(object_key, config)
-    if object_key in _CONTACT_POINT_OBJECTS:
-        filtered_required: List[str] = []
-        for field in required:
-            if field == contact_field or field == individual_field:
-                if field and field not in filtered_required:
-                    filtered_required.append(field)
-                continue
-            if field not in filtered_required:
-                filtered_required.append(field)
-        required = filtered_required
-    else:
-        for extra_field in (
-            definition.get("contact_field"),
-            definition.get("individual_field"),
-        ):
-            if isinstance(extra_field, str) and extra_field and extra_field not in required:
-                required.append(extra_field)
+    required = [field for field in definition.get("required_fields", []) if isinstance(field, str)]
+    for extra_field in (
+        definition.get("contact_field"),
+        definition.get("individual_field"),
+    ):
+        if isinstance(extra_field, str) and extra_field and extra_field not in required:
+            required.append(extra_field)
     display_fields = config.get_fields(object_key)
     try:
         available_fields = _get_object_field_names(org, object_key)
@@ -734,27 +613,6 @@ def _build_query_fields(org: OrgConfig, object_key: str, config: ExplorerConfig)
     for field in required:
         if field in available_fields and field not in query_fields:
             query_fields.append(field)
-    if object_key in _CONTACT_POINT_OBJECTS:
-        for extra_field in (contact_field, individual_field):
-            if (
-                isinstance(extra_field, str)
-                and extra_field
-                and extra_field in available_fields
-                and extra_field not in query_fields
-            ):
-                query_fields.append(extra_field)
-    else:
-        for extra_field in (
-            definition.get("contact_field"),
-            definition.get("individual_field"),
-        ):
-            if (
-                isinstance(extra_field, str)
-                and extra_field
-                and extra_field in available_fields
-                and extra_field not in query_fields
-            ):
-                query_fields.append(extra_field)
     for field in display_fields:
         if field in available_fields:
             if field not in query_fields:
@@ -801,28 +659,23 @@ def _record_to_field_list(
     return payload
 
 
-def _get_object_link_fields(
-    object_key: str, config: Optional[ExplorerConfig] = None
-) -> List[str]:
+def _get_object_link_fields(object_key: str) -> List[str]:
     definition = _OBJECT_DEFINITIONS.get(object_key, {})
     link_fields: List[str] = []
     for field_name in definition.get("required_fields", []) or []:
         if isinstance(field_name, str) and field_name and field_name not in link_fields:
             link_fields.append(field_name)
-    filter_field = definition.get("filter_field")
-    if isinstance(filter_field, str) and filter_field and filter_field not in link_fields:
-        link_fields.append(filter_field)
-    if object_key in _CONTACT_POINT_OBJECTS:
-        contact_field, individual_field = _resolve_contact_point_fields(object_key, config)
-        for candidate in (contact_field, individual_field):
-            if isinstance(candidate, str) and candidate and candidate not in link_fields:
-                link_fields.append(candidate)
-    else:
-        for candidate in (
-            definition.get("contact_field"),
-            definition.get("individual_field"),
-        ):
-            if isinstance(candidate, str) and candidate and candidate not in link_fields:
+    extra_candidates = [
+        definition.get("filter_field"),
+        definition.get("contact_field"),
+        definition.get("individual_field"),
+    ]
+    for candidate in extra_candidates:
+        if isinstance(candidate, str) and candidate and candidate not in link_fields:
+            link_fields.append(candidate)
+    if object_key in ("ContactPointPhone", "ContactPointEmail"):
+        for candidate in ("ContactId", "Contact__c", "ParentId", "IndividualId", "Individual__c"):
+            if candidate not in link_fields:
                 link_fields.append(candidate)
     if object_key == "AccountContactRelation":
         for candidate in ("AccountId", "ContactId"):
@@ -875,78 +728,24 @@ def _aggregate_contact_points(
         "individual": {},
     }
     contact_candidates: List[str] = []
-    if isinstance(contact_field, str) and contact_field:
-        contact_candidates.append(contact_field)
+    for field in (contact_field, "ContactId", "Contact__c", "ParentId"):
+        if isinstance(field, str) and field and field not in contact_candidates:
+            contact_candidates.append(field)
     individual_candidates: List[str] = []
-    if isinstance(individual_field, str) and individual_field:
-        individual_candidates.append(individual_field)
-
-    def _add_link_source(record: Dict[str, object], link_type: str, field_name: str) -> None:
-        if link_type not in _CONTACT_POINT_LINK_MODES:
-            return
-        if not isinstance(field_name, str) or not field_name:
-            return
-        sources = record.setdefault("_link_sources", {})
-        if not isinstance(sources, dict):
-            sources = {}
-            record["_link_sources"] = sources
-        field_set = sources.setdefault(link_type, set())
-        if isinstance(field_set, set):
-            field_set.add(field_name)
-        else:
-            try:
-                collection = set(field_set)
-            except TypeError:
-                collection = {field_name}
-            else:
-                collection.add(field_name)
-            sources[link_type] = collection
-
+    for field in (individual_field, "IndividualId", "Individual__c"):
+        if isinstance(field, str) and field and field not in individual_candidates:
+            individual_candidates.append(field)
     for record in contact_points:
-        if contact_candidates:
-            for field in contact_candidates:
-                contact_id = record.get(field)
-                if contact_id:
-                    _add_link_source(record, "contact", field)
-                    mapping["contact"].setdefault(str(contact_id), []).append(record)
-                    break
-        if individual_candidates:
-            for field in individual_candidates:
-                individual_id = record.get(field)
-                if individual_id:
-                    _add_link_source(record, "individual", field)
-                    mapping["individual"].setdefault(str(individual_id), []).append(record)
-                    break
-
-    for record in contact_points:
-        metadata = record.get("_link_sources")
-        if not isinstance(metadata, dict):
-            continue
-        normalized: List[Dict[str, str]] = []
-        for link_type in _CONTACT_POINT_MODE_ORDER:
-            fields = metadata.get(link_type)
-            if isinstance(fields, set):
-                field_values = sorted(
-                    field for field in fields if isinstance(field, str) and field
-                )
-            elif isinstance(fields, (list, tuple)):
-                field_values = [
-                    str(field)
-                    for field in fields
-                    if isinstance(field, str) and field
-                ]
-            else:
-                field_values = []
-            seen_fields: Set[str] = set()
-            for field_name in field_values:
-                if field_name in seen_fields:
-                    continue
-                normalized.append({"type": link_type, "field": field_name})
-                seen_fields.add(field_name)
-        if normalized:
-            record["_link_sources"] = normalized
-        else:
-            record.pop("_link_sources", None)
+        for field in contact_candidates:
+            contact_id = record.get(field)
+            if contact_id:
+                mapping["contact"].setdefault(str(contact_id), []).append(record)
+                break
+        for field in individual_candidates:
+            individual_id = record.get(field)
+            if individual_id:
+                mapping["individual"].setdefault(str(individual_id), []).append(record)
+                break
     return mapping
 
 
@@ -1282,39 +1081,60 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         definition = _OBJECT_DEFINITIONS.get(object_key, {})
         query_fields, display_fields = _build_query_fields(org, object_key, config)
         records_by_id: Dict[str, Dict[str, object]] = {}
-        contact_field, individual_field = _resolve_contact_point_fields(object_key, config)
-        contact_field_name = contact_field or ""
-        individual_field_name = individual_field or ""
+        if "individual_field" in definition:
+            raw_individual_field = definition.get("individual_field")
+        else:
+            raw_individual_field = "IndividualId"
+        if "contact_field" in definition:
+            raw_contact_field = definition.get("contact_field")
+        else:
+            raw_contact_field = "ContactId"
+        individual_field = ""
+        contact_field = ""
+        if raw_individual_field is not None:
+            individual_field = str(raw_individual_field)
+        if raw_contact_field is not None:
+            contact_field = str(raw_contact_field)
         try:
             available_contact_point_fields = _get_object_field_names(org, object_key)
         except SalesforceError as exc:
             logger.warning("Unable to describe %s: %s", object_key, exc)
             available_contact_point_fields = set()
         if (
-            individual_field_name
-            and individual_field_name not in available_contact_point_fields
+            individual_field
+            and individual_field.lower() != "none"
+            and individual_field not in available_contact_point_fields
         ):
-            individual_field_name = ""
-        if contact_field_name and contact_field_name not in available_contact_point_fields:
-            contact_field_name = ""
-        if individual_field_name and individual_ids:
+            individual_field = ""
+        if (
+            contact_field
+            and contact_field.lower() != "none"
+            and contact_field not in available_contact_point_fields
+        ):
+            contact_field = ""
+        if individual_field and individual_field.lower() != "none" and individual_ids:
             for chunk in _chunk(individual_ids, 100):
                 if object_key in warnings:
                     break
                 soql = (
-                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {individual_field_name} IN ({_format_ids_for_soql(chunk)})"
+                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {individual_field} IN ({_format_ids_for_soql(chunk)})"
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
                     record_id = record.get("Id")
                     if record_id:
                         records_by_id[str(record_id)] = record
-        if object_key not in warnings and contact_field_name and contact_ids:
+        if (
+            object_key not in warnings
+            and contact_field
+            and contact_field.lower() != "none"
+            and contact_ids
+        ):
             for chunk in _chunk(contact_ids, 100):
                 if object_key in warnings:
                     break
                 soql = (
-                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {contact_field_name} IN ({_format_ids_for_soql(chunk)})"
+                    f"SELECT {', '.join(query_fields)} FROM {object_key} WHERE {contact_field} IN ({_format_ids_for_soql(chunk)})"
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
@@ -1325,8 +1145,8 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         results[object_key] = records
         contact_point_mappings[object_key] = _aggregate_contact_points(
             records,
-            contact_field=contact_field_name or None,
-            individual_field=individual_field_name or None,
+            contact_field=contact_field,
+            individual_field=individual_field,
         )
 
     contact_by_account = _map_records_by_field(contacts, "AccountId")
@@ -1387,7 +1207,7 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
             "fields": _record_to_field_list(
                 account_display_fields,
                 account_record,
-                extra_fields=_get_object_link_fields("Account", config),
+                extra_fields=_get_object_link_fields("Account"),
                 alert_details=account_field_alerts,
             ),
             "related": {},
@@ -1419,30 +1239,10 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                     "fields": _record_to_field_list(
                         display_fields,
                         record,
-                        extra_fields=_get_object_link_fields(key, config),
+                        extra_fields=_get_object_link_fields(key),
                         alert_details=field_alerts_for_record,
                     ),
                 }
-                if key in _CONTACT_POINT_OBJECTS:
-                    link_sources_raw = record.get("_link_sources")
-                    normalized_sources: List[Dict[str, str]] = []
-                    if isinstance(link_sources_raw, list):
-                        for item in link_sources_raw:
-                            if not isinstance(item, dict):
-                                continue
-                            link_type = item.get("type")
-                            field_name = item.get("field")
-                            if (
-                                isinstance(link_type, str)
-                                and link_type in _CONTACT_POINT_LINK_MODES
-                                and isinstance(field_name, str)
-                                and field_name
-                            ):
-                                normalized_sources.append(
-                                    {"type": link_type, "field": field_name}
-                                )
-                    if normalized_sources:
-                        record_payload["linkSources"] = normalized_sources
                 if alert_ids:
                     record_payload["alerts"] = alert_ids
                 if record_alerts_for_record:

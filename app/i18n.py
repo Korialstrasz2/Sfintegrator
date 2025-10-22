@@ -156,10 +156,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "open_wide_tree": "Open wide tree view in new tab",
                 "tree_tab_title": "{account} — Tree view",
                 "account_label": "Account",
-                "contact_point_sources": {
-                    "contact": "Linked via {field} (Contact)",
-                    "individual": "Linked via {field} (Individual)",
-                },
                 "view": {
                     "label": "Results view",
                     "list": "List",
@@ -183,14 +179,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "org_label": "Field suggestions org",
                 "org_placeholder": "Select an org (optional)",
                 "org_help": "Used to load autocomplete suggestions when editing fields.",
-                "contact_points": {
-                    "title": "Contact point matching",
-                    "description": "Choose how Contact Point Phone and Contact Point Email records should be retrieved.",
-                    "options": {
-                        "contact": "Match via Contact__c (Contact)",
-                        "individual": "Match via ParentId (Individual)",
-                    },
-                },
                 "alerts": {
                     "title": "Alerts",
                     "description": "Highlight accounts when related records match custom conditions.",
@@ -461,7 +449,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "no_accounts": "Load at least one account ID.",
                 "no_org": "Select an org before running the explorer.",
                 "download_unavailable": "Run the explorer before downloading.",
-                "contact_points_required": "Keep at least one matching option selected for {object}.",
                 "orgs_failed": "Unable to load org list.",
                 "fields_failed": "Unable to load fields for suggestions.",
                 "run": {
@@ -634,10 +621,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "open_wide_tree": "Apri vista albero ampia in una nuova scheda",
                 "tree_tab_title": "{account} — Vista albero",
                 "account_label": "Account",
-                "contact_point_sources": {
-                    "contact": "Collegato tramite {field} (Contatto)",
-                    "individual": "Collegato tramite {field} (Individual)",
-                },
                 "view": {
                     "label": "Vista risultati",
                     "list": "Elenco",
@@ -661,14 +644,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "org_label": "Org per suggerimenti campi",
                 "org_placeholder": "Seleziona un'organizzazione (opzionale)",
                 "org_help": "Usata per caricare suggerimenti di autocompletamento durante la modifica dei campi.",
-                "contact_points": {
-                    "title": "Associazione contact point",
-                    "description": "Scegli come recuperare i record Contact Point Phone e Contact Point Email.",
-                    "options": {
-                        "contact": "Abbina tramite Contact__c (Contatto)",
-                        "individual": "Abbina tramite ParentId (Individual)",
-                    },
-                },
                 "alerts": {
                     "title": "Avvisi",
                     "description": "Evidenzia gli account quando i record collegati soddisfano condizioni personalizzate.",
@@ -939,7 +914,6 @@ _LANGUAGE_PACKS: Dict[str, Dict[str, Any]] = {
                 "no_accounts": "Carica almeno un ID account.",
                 "no_org": "Seleziona un'organizzazione prima di avviare l'esplorazione.",
                 "download_unavailable": "Esegui l'esplorazione prima di scaricare.",
-                "contact_points_required": "Mantieni almeno un'opzione selezionata per {object}.",
                 "orgs_failed": "Impossibile caricare l'elenco delle organizzazioni.",
                 "fields_failed": "Impossibile caricare i campi per i suggerimenti.",
                 "run": {
