@@ -1012,6 +1012,8 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         raise ValueError("no_valid_ids")
 
     config = get_config()
+    alerts_config = config.get_alerts()
+    alert_object_keys = _get_alert_object_keys(alerts_config)
     results: Dict[str, List[Dict[str, object]]] = {}
     warnings: Dict[str, str] = {}
 
