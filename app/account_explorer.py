@@ -687,8 +687,6 @@ def _get_object_link_fields(object_key: str) -> List[str]:
 def _filter_records_by_field(records: Sequence[Dict[str, object]], field_name: str, target_value: str) -> List[Dict[str, object]]:
     filtered = []
     for record in records:
-        if not isinstance(record, dict):
-            continue
         if str(record.get(field_name, "")) == target_value:
             filtered.append(record)
     return filtered
@@ -697,8 +695,6 @@ def _filter_records_by_field(records: Sequence[Dict[str, object]], field_name: s
 def _map_records_by_field(records: Sequence[Dict[str, object]], field_name: str) -> MutableMapping[str, List[Dict[str, object]]]:
     mapping: MutableMapping[str, List[Dict[str, object]]] = {}
     for record in records:
-        if not isinstance(record, dict):
-            continue
         key = record.get(field_name)
         if not key:
             continue
@@ -712,8 +708,6 @@ def _aggregate_individuals_by_account(
 ) -> MutableMapping[str, Set[str]]:
     account_to_individuals: MutableMapping[str, Set[str]] = {}
     for contact in contacts:
-        if not isinstance(contact, dict):
-            continue
         account_id = contact.get("AccountId")
         individual_id = contact.get("IndividualId")
         if not account_id or not individual_id:
@@ -742,8 +736,6 @@ def _aggregate_contact_points(
         if isinstance(field, str) and field and field not in individual_candidates:
             individual_candidates.append(field)
     for record in contact_points:
-        if not isinstance(record, dict):
-            continue
         for field in contact_candidates:
             contact_id = record.get(field)
             if contact_id:
@@ -1034,8 +1026,6 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
         soql = f"SELECT {', '.join(account_query_fields)} FROM Account WHERE Id IN ({_format_ids_for_soql(chunk)})"
         data = _query_all_with_handling(org, soql, "Account", warnings, required=True)
         for record in data.get("records", []):
-            if not isinstance(record, dict):
-                continue
             record_id = record.get("Id")
             if not record_id:
                 continue
@@ -1064,8 +1054,6 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
     individual_ids: List[str] = []
     contact_ids: List[str] = []
     for contact in contacts:
-        if not isinstance(contact, dict):
-            continue
         individual_id = contact.get("IndividualId")
         if individual_id and str(individual_id) not in individual_ids:
             individual_ids.append(str(individual_id))
@@ -1080,8 +1068,6 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
             soql = f"SELECT {', '.join(individual_query_fields)} FROM Individual WHERE Id IN ({_format_ids_for_soql(chunk)})"
             data = _query_all_with_handling(org, soql, "Individual", warnings)
             for record in data.get("records", []):
-                if not isinstance(record, dict):
-                    continue
                 record_id = record.get("Id")
                 if record_id:
                     individual_records[str(record_id)] = record
@@ -1135,8 +1121,6 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
-                    if not isinstance(record, dict):
-                        continue
                     record_id = record.get("Id")
                     if record_id:
                         records_by_id[str(record_id)] = record
@@ -1154,8 +1138,6 @@ def run_explorer(org: OrgConfig, account_ids: Sequence[str]) -> ExplorerResult:
                 )
                 data = _query_all_with_handling(org, soql, object_key, warnings)
                 for record in data.get("records", []):
-                    if not isinstance(record, dict):
-                        continue
                     record_id = record.get("Id")
                     if record_id:
                         records_by_id[str(record_id)] = record
