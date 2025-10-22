@@ -93,6 +93,22 @@
     return normalized;
   }
 
+  function getObjectDefinitions() {
+    if (Array.isArray(window.ACCOUNT_EXPLORER_OBJECTS)) {
+      return window.ACCOUNT_EXPLORER_OBJECTS;
+    }
+    return [];
+  }
+
+  function getObjectLabel(key) {
+    if (key === "Account") {
+      return translateKey("account_explorer.results.account_label");
+    }
+    const definitions = getObjectDefinitions();
+    const definition = definitions.find((item) => item && item.key === key);
+    return definition ? definition.label : key;
+  }
+
   function getFieldValue(fields, name) {
     if (!Array.isArray(fields) || !name) {
       return null;
@@ -416,14 +432,6 @@
       }
       return !definition.hidden;
     }
-
-  function getObjectLabel(key) {
-    if (key === "Account") {
-      return translateKey("account_explorer.results.account_label");
-    }
-    const definition = objectDefinitions.find((item) => item.key === key);
-    return definition ? definition.label : key;
-  }
 
     function getVisibleObjects() {
       return objectDefinitions.filter((item) => !item.hidden);
