@@ -86,6 +86,88 @@
     ADVANCED_AGGREGATE_OPERATIONS.map((option) => [option.value, option])
   );
 
+  const ADVANCED_TEMPLATES = [
+    {
+      id: "duplicate_contact_roles",
+      labelKey: "account_explorer.setup.alerts.advanced.templates.contact_roles.label",
+      descriptionKey:
+        "account_explorer.setup.alerts.advanced.templates.contact_roles.description",
+      build() {
+        return {
+          type: "group",
+          logic: "and",
+          children: [
+            {
+              type: "aggregate",
+              object: "AccountContactRelation",
+              operation: "duplicates",
+              field: "Roles",
+              minCount: 2,
+              distinctField: "ContactId",
+              criteria: {
+                type: "group",
+                logic: "and",
+                children: [
+                  {
+                    type: "condition",
+                    object: "AccountContactRelation",
+                    field: "Roles",
+                    operator: "not_blank",
+                  },
+                ],
+              },
+            },
+          ],
+        };
+      },
+    },
+    {
+      id: "contact_reachability",
+      labelKey: "account_explorer.setup.alerts.advanced.templates.contact_channels.label",
+      descriptionKey:
+        "account_explorer.setup.alerts.advanced.templates.contact_channels.description",
+      build() {
+        return {
+          type: "group",
+          logic: "and",
+          children: [
+            {
+              type: "scope",
+              object: "Contact",
+              match: "all",
+              children: [
+                {
+                  type: "group",
+                  logic: "or",
+                  children: [
+                    {
+                      type: "condition",
+                      object: "Contact",
+                      field: "Phone",
+                      operator: "not_blank",
+                    },
+                    {
+                      type: "condition",
+                      object: "Contact",
+                      field: "MobilePhone",
+                      operator: "not_blank",
+                    },
+                    {
+                      type: "condition",
+                      object: "Contact",
+                      field: "Email",
+                      operator: "not_blank",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        };
+      },
+    },
+  ];
+
   function translateKey(key, params = {}) {
     if (typeof translate === "function") {
       const normalizedKey =
@@ -101,6 +183,17 @@
       }
     }
     return key;
+  }
+
+  function translateWithFallback(key, fallback, params = {}) {
+    if (!key) {
+      return fallback;
+    }
+    const translated = translateKey(key, params);
+    if (translated && translated !== key) {
+      return translated;
+    }
+    return fallback;
   }
 
   function formatValue(value) {
@@ -145,7 +238,22 @@
         return;
       }
       const label = typeof item.label === "string" && item.label ? item.label : key;
-      normalized.push({ key, label, hidden: Boolean(item.hidden) });
+      const path = Array.isArray(item.path)
+        ? item.path.filter((entry) => typeof entry === "string" && entry)
+        : [];
+      const pathLabel =
+        typeof item.path_label === "string" && item.path_label
+          ? item.path_label
+          : path.length
+          ? path.join(" → ")
+          : label;
+      normalized.push({
+        key,
+        label,
+        hidden: Boolean(item.hidden),
+        path,
+        pathLabel,
+      });
       seen.add(key);
     });
     return normalized;
@@ -983,6 +1091,106 @@
         }
         datalist.appendChild(option);
       });
+    }
+
+    function getObjectPathLabelFromMap(objectKey, objectMap) {
+      if (!objectKey) {
+        return "";
+      }
+      if (objectKey === "Account") {
+        return translateKey("account_explorer.results.account_label");
+      }
+      if (objectMap && objectMap.has(objectKey)) {
+        const definition = objectMap.get(objectKey);
+        if (definition?.pathLabel) {
+          return definition.pathLabel;
+        }
+        if (Array.isArray(definition?.path) && definition.path.length) {
+          return definition.path.join(" → ");
+        }
+        if (definition?.label) {
+          return definition.label;
+        }
+      }
+      return objectKey;
+    }
+
+    function createObjectPathNoteElement(translationKey, pathLabel) {
+      if (!translationKey || !pathLabel) {
+        return null;
+      }
+      const note = document.createElement("p");
+      note.className = "small text-muted mb-0";
+      note.textContent = translateKey(translationKey, { path: pathLabel });
+      return note;
+    }
+
+    function populateFieldSelectOptions(selectEl, objectKey, { value, placeholderKey } = {}) {
+      if (!selectEl) {
+        return;
+      }
+      const normalizedObjectKey = typeof objectKey === "string" ? objectKey : "";
+      const hasOrgSelection = setupOrgSelect && setupOrgSelect.value;
+      const placeholderText = hasOrgSelection
+        ? translateKey(placeholderKey || "account_explorer.setup.alerts.field_placeholder")
+        : translateKey("account_explorer.setup.alerts.select_org_for_fields");
+      selectEl.innerHTML = "";
+      const placeholderOption = document.createElement("option");
+      placeholderOption.value = "";
+      placeholderOption.textContent = placeholderText;
+      selectEl.appendChild(placeholderOption);
+      selectEl.value = "";
+      selectEl.dataset.object = normalizedObjectKey;
+      if (!normalizedObjectKey || !hasOrgSelection) {
+        if (value) {
+          selectEl.dataset.pendingValue = value;
+        } else {
+          delete selectEl.dataset.pendingValue;
+        }
+        selectEl.disabled = true;
+        return;
+      }
+      selectEl.disabled = true;
+      const pendingValue = value || selectEl.dataset.pendingValue || "";
+      selectEl.dataset.pendingValue = pendingValue;
+      loadFieldsForObject(normalizedObjectKey)
+        .then((fields) => {
+          const seen = new Set();
+          (fields || []).forEach((field) => {
+            if (!field || !field.name) {
+              return;
+            }
+            const name = field.name;
+            if (seen.has(name)) {
+              return;
+            }
+            seen.add(name);
+            const option = document.createElement("option");
+            option.value = name;
+            option.textContent = field.label ? `${field.label} (${name})` : name;
+            selectEl.appendChild(option);
+          });
+          if (pendingValue) {
+            if (!seen.has(pendingValue)) {
+              const customOption = document.createElement("option");
+              customOption.value = pendingValue;
+              customOption.textContent = pendingValue;
+              selectEl.appendChild(customOption);
+            }
+            selectEl.value = pendingValue;
+          }
+        })
+        .catch((error) => {
+          if (error instanceof Error && error.message === "no_org") {
+            // Ignored: the org selection will trigger a re-render when available.
+          } else {
+            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
+          }
+        })
+        .finally(() => {
+          delete selectEl.dataset.pendingValue;
+          selectEl.disabled = false;
+        });
     }
 
     function renderMissingAccounts(missing) {
@@ -2569,25 +2777,18 @@
       }
     }
 
-    function loadAlertFieldSuggestions(alertId, filterId) {
-      const alert = findAlertById(alertId);
-      const filter = findAlertFilter(alert, filterId);
-      if (!filter || !filter.object) {
+    function populateAlertFieldOptions(alertId, filterId) {
+      if (!setupAlertList) {
         return;
       }
-      loadFieldsForObject(filter.object)
-        .then((fields) => {
-          const datalistId = `account-explorer-alert-datalist-${alertId}-${filterId}`;
-          const datalist = document.getElementById(datalistId);
-          populateDatalistElement(datalist, fields);
-        })
-        .catch((error) => {
-          if (error instanceof Error && error.message === "no_org") {
-            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
-          } else {
-            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
-          }
-        });
+      const alert = findAlertById(alertId);
+      const filter = findAlertFilter(alert, filterId);
+      if (!filter) {
+        return;
+      }
+      const selector = `select[data-role="alert-field"][data-alert-id="${alertId}"][data-filter-id="${filterId}"]`;
+      const selectEl = setupAlertList.querySelector(selector);
+      populateFieldSelectOptions(selectEl, filter.object || "", { value: filter.field });
     }
 
     function renderAdvancedBuilder(alert, container, { alertObjects }) {
@@ -2600,8 +2801,55 @@
       intro.className = "small text-muted mb-2";
       intro.innerHTML = translateKey("account_explorer.setup.alerts.advanced.builder_intro");
       container.appendChild(intro);
+      if (ADVANCED_TEMPLATES.length) {
+        const templatesIntro = document.createElement("div");
+        templatesIntro.className = "mb-2";
+        const templatesTitle = document.createElement("div");
+        templatesTitle.className = "fw-semibold small text-uppercase text-muted";
+        templatesTitle.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.templates.title"
+        );
+        templatesIntro.appendChild(templatesTitle);
+        const templatesDescription = document.createElement("p");
+        templatesDescription.className = "small text-muted mb-2";
+        templatesDescription.textContent = translateKey(
+          "account_explorer.setup.alerts.advanced.templates.description"
+        );
+        templatesIntro.appendChild(templatesDescription);
+        container.appendChild(templatesIntro);
+
+        const templatesList = document.createElement("div");
+        templatesList.className = "d-grid gap-2 mb-3";
+        ADVANCED_TEMPLATES.forEach((template) => {
+          const card = document.createElement("div");
+          card.className = "border rounded p-3";
+          const cardTitle = document.createElement("div");
+          cardTitle.className = "fw-semibold small";
+          cardTitle.textContent = translateKey(template.labelKey);
+          card.appendChild(cardTitle);
+          const cardDescription = document.createElement("p");
+          cardDescription.className = "small text-muted mb-2";
+          cardDescription.textContent = translateKey(template.descriptionKey);
+          card.appendChild(cardDescription);
+          const cardButton = document.createElement("button");
+          cardButton.type = "button";
+          cardButton.className = "btn btn-outline-primary btn-sm";
+          cardButton.dataset.action = "apply-advanced-template";
+          cardButton.dataset.alertId = alert.id;
+          cardButton.dataset.templateId = template.id;
+          cardButton.textContent = translateKey(
+            "account_explorer.setup.alerts.advanced.templates.use"
+          );
+          card.appendChild(cardButton);
+          templatesList.appendChild(card);
+        });
+        container.appendChild(templatesList);
+      }
+
+      const objectMap = new Map((alertObjects || []).map((item) => [item.key, item]));
       const rootElement = renderAdvancedNode(alert, root, {
         alertObjects,
+        objectMap,
         isRoot: true,
         allowScope: true,
         allowAggregate: true,
@@ -2687,6 +2935,7 @@
         children.forEach((child) => {
           const childElement = renderAdvancedNode(alert, child, {
             alertObjects: options.alertObjects,
+            objectMap: options.objectMap,
             isRoot: false,
             allowScope: options.parentScope ? false : options.allowScope,
             allowAggregate: options.parentScope ? false : options.allowAggregate,
@@ -2826,6 +3075,19 @@
 
       element.appendChild(header);
 
+      const scopePathLabel = getObjectPathLabelFromMap(node.object, options.objectMap);
+      if (scopePathLabel) {
+        const scopeNote = createObjectPathNoteElement(
+          "account_explorer.setup.alerts.advanced.scope_path",
+          scopePathLabel
+        );
+        if (scopeNote) {
+          scopeNote.classList.remove("mb-0");
+          scopeNote.classList.add("mb-2");
+          element.appendChild(scopeNote);
+        }
+      }
+
       const body = document.createElement("div");
       body.className = "advanced-node-body";
       const children = Array.isArray(node.children) ? node.children : [];
@@ -2833,6 +3095,7 @@
         children.forEach((child) => {
           const childElement = renderAdvancedNode(alert, child, {
             alertObjects: options.alertObjects,
+            objectMap: options.objectMap,
             isRoot: false,
             allowScope: false,
             allowAggregate: false,
@@ -2922,7 +3185,10 @@
       } else {
         const scopeTag = document.createElement("span");
         scopeTag.className = "badge bg-secondary text-wrap";
-        scopeTag.textContent = options.parentScope;
+        scopeTag.textContent = getObjectPathLabelFromMap(
+          options.parentScope,
+          options.objectMap
+        );
         header.appendChild(scopeTag);
       }
 
@@ -2956,27 +3222,20 @@
         `account-explorer-advanced-field-${alert.id}-${node.id}`
       );
       fieldCol.appendChild(fieldLabel);
-      const fieldInput = document.createElement("input");
-      fieldInput.type = "text";
-      fieldInput.className = "form-control form-control-sm";
-      fieldInput.id = `account-explorer-advanced-field-${alert.id}-${node.id}`;
-      fieldInput.value = node.field || "";
-      fieldInput.dataset.alertId = alert.id;
-      fieldInput.dataset.nodeId = node.id;
-      fieldInput.dataset.role = "advanced-field";
       const objectForField = options.parentScope || node.object || "";
-      if (objectForField) {
-        fieldInput.dataset.object = objectForField;
-      }
-      fieldInput.setAttribute(
-        "list",
-        `account-explorer-advanced-datalist-${alert.id}-${node.id}`
-      );
-      const fieldDatalist = document.createElement("datalist");
-      fieldDatalist.id = `account-explorer-advanced-datalist-${alert.id}-${node.id}`;
-      fieldCol.appendChild(fieldInput);
-      fieldCol.appendChild(fieldDatalist);
+      const fieldSelect = document.createElement("select");
+      fieldSelect.className = "form-select form-select-sm";
+      fieldSelect.id = `account-explorer-advanced-field-${alert.id}-${node.id}`;
+      fieldSelect.dataset.alertId = alert.id;
+      fieldSelect.dataset.nodeId = node.id;
+      fieldSelect.dataset.role = "advanced-field";
+      fieldSelect.dataset.object = objectForField;
+      fieldCol.appendChild(fieldSelect);
       row.appendChild(fieldCol);
+      populateFieldSelectOptions(fieldSelect, objectForField, {
+        value: node.field,
+        placeholderKey: "account_explorer.setup.alerts.field_placeholder",
+      });
 
       const operatorCol = document.createElement("div");
       operatorCol.className = "col-md-3";
@@ -3033,6 +3292,18 @@
       row.appendChild(valueCol);
 
       body.appendChild(row);
+      const fieldPathLabel = getObjectPathLabelFromMap(objectForField, options.objectMap);
+      if (fieldPathLabel) {
+        const fieldNote = createObjectPathNoteElement(
+          "account_explorer.setup.alerts.advanced.condition_path",
+          fieldPathLabel
+        );
+        if (fieldNote) {
+          fieldNote.classList.remove("mb-0");
+          fieldNote.classList.add("mt-1");
+          body.appendChild(fieldNote);
+        }
+      }
       element.appendChild(body);
 
       updateAdvancedConditionValueState(alert.id, node.id);
@@ -3128,26 +3399,19 @@
         `account-explorer-advanced-aggregate-field-${alert.id}-${node.id}`
       );
       fieldCol.appendChild(fieldLabel);
-      const fieldInput = document.createElement("input");
-      fieldInput.type = "text";
-      fieldInput.className = "form-control form-control-sm";
-      fieldInput.id = `account-explorer-advanced-aggregate-field-${alert.id}-${node.id}`;
-      fieldInput.value = node.field || "";
-      fieldInput.dataset.alertId = alert.id;
-      fieldInput.dataset.nodeId = node.id;
-      fieldInput.dataset.role = "advanced-aggregate-field";
-      if (node.object) {
-        fieldInput.dataset.object = node.object;
-      }
-      fieldInput.setAttribute(
-        "list",
-        `account-explorer-advanced-aggregate-datalist-${alert.id}-${node.id}`
-      );
-      const fieldDatalist = document.createElement("datalist");
-      fieldDatalist.id = `account-explorer-advanced-aggregate-datalist-${alert.id}-${node.id}`;
-      fieldCol.appendChild(fieldInput);
-      fieldCol.appendChild(fieldDatalist);
+      const fieldSelect = document.createElement("select");
+      fieldSelect.className = "form-select form-select-sm";
+      fieldSelect.id = `account-explorer-advanced-aggregate-field-${alert.id}-${node.id}`;
+      fieldSelect.dataset.alertId = alert.id;
+      fieldSelect.dataset.nodeId = node.id;
+      fieldSelect.dataset.role = "advanced-aggregate-field";
+      fieldSelect.dataset.object = node.object || "";
+      fieldCol.appendChild(fieldSelect);
       row.appendChild(fieldCol);
+      populateFieldSelectOptions(fieldSelect, node.object || "", {
+        value: node.field,
+        placeholderKey: "account_explorer.setup.alerts.field_placeholder",
+      });
 
       const minCountCol = document.createElement("div");
       minCountCol.className = "col-md-3";
@@ -3186,28 +3450,34 @@
         `account-explorer-advanced-aggregate-distinct-${alert.id}-${node.id}`
       );
       distinctCol.appendChild(distinctLabel);
-      const distinctInput = document.createElement("input");
-      distinctInput.type = "text";
-      distinctInput.className = "form-control form-control-sm";
-      distinctInput.id = `account-explorer-advanced-aggregate-distinct-${alert.id}-${node.id}`;
-      distinctInput.value = node.distinctField || "";
-      distinctInput.dataset.alertId = alert.id;
-      distinctInput.dataset.nodeId = node.id;
-      distinctInput.dataset.role = "advanced-aggregate-distinct";
-      if (node.object) {
-        distinctInput.dataset.object = node.object;
-      }
-      distinctInput.setAttribute(
-        "list",
-        `account-explorer-advanced-aggregate-distinct-datalist-${alert.id}-${node.id}`
-      );
-      const distinctDatalist = document.createElement("datalist");
-      distinctDatalist.id = `account-explorer-advanced-aggregate-distinct-datalist-${alert.id}-${node.id}`;
-      distinctCol.appendChild(distinctInput);
-      distinctCol.appendChild(distinctDatalist);
+      const distinctSelect = document.createElement("select");
+      distinctSelect.className = "form-select form-select-sm";
+      distinctSelect.id = `account-explorer-advanced-aggregate-distinct-${alert.id}-${node.id}`;
+      distinctSelect.dataset.alertId = alert.id;
+      distinctSelect.dataset.nodeId = node.id;
+      distinctSelect.dataset.role = "advanced-aggregate-distinct";
+      distinctSelect.dataset.object = node.object || "";
+      distinctCol.appendChild(distinctSelect);
       row.appendChild(distinctCol);
+      populateFieldSelectOptions(distinctSelect, node.object || "", {
+        value: node.distinctField,
+        placeholderKey: "account_explorer.setup.alerts.field_placeholder",
+      });
 
       body.appendChild(row);
+
+      const aggregatePathLabel = getObjectPathLabelFromMap(node.object, options.objectMap);
+      if (aggregatePathLabel) {
+        const aggregateNote = createObjectPathNoteElement(
+          "account_explorer.setup.alerts.advanced.aggregate_path",
+          aggregatePathLabel
+        );
+        if (aggregateNote) {
+          aggregateNote.classList.remove("mb-0");
+          aggregateNote.classList.add("mt-1");
+          body.appendChild(aggregateNote);
+        }
+      }
 
       if (node.criteria) {
         const criteriaHeader = document.createElement("div");
@@ -3218,6 +3488,7 @@
         body.appendChild(criteriaHeader);
         const criteriaNode = renderAdvancedNode(alert, node.criteria, {
           alertObjects: options.alertObjects,
+          objectMap: options.objectMap,
           isRoot: false,
           allowScope: false,
           allowAggregate: false,
@@ -3387,25 +3658,19 @@
             const fieldInputId = `account-explorer-alert-field-${alert.id}-${filter.id}`;
             fieldLabel.setAttribute("for", fieldInputId);
             fieldLabel.textContent = translateKey("account_explorer.setup.alerts.field");
-            const fieldInput = document.createElement("input");
-            fieldInput.type = "text";
-            fieldInput.className = "form-control form-control-sm";
-            fieldInput.id = fieldInputId;
-            fieldInput.value = filter.field || "";
-            fieldInput.dataset.alertId = alert.id;
-            fieldInput.dataset.filterId = filter.id;
-            fieldInput.dataset.role = "alert-field";
-            const datalistId = `account-explorer-alert-datalist-${alert.id}-${filter.id}`;
-            fieldInput.setAttribute("list", datalistId);
-            fieldInput.addEventListener("focus", () =>
-              loadAlertFieldSuggestions(alert.id, filter.id)
-            );
-            const fieldDatalist = document.createElement("datalist");
-            fieldDatalist.id = datalistId;
+            const fieldSelect = document.createElement("select");
+            fieldSelect.className = "form-select form-select-sm";
+            fieldSelect.id = fieldInputId;
+            fieldSelect.dataset.alertId = alert.id;
+            fieldSelect.dataset.filterId = filter.id;
+            fieldSelect.dataset.role = "alert-field";
             fieldCol.appendChild(fieldLabel);
-            fieldCol.appendChild(fieldInput);
-            fieldCol.appendChild(fieldDatalist);
+            fieldCol.appendChild(fieldSelect);
             row.appendChild(fieldCol);
+            populateFieldSelectOptions(fieldSelect, filter.object || "", {
+              value: filter.field,
+              placeholderKey: "account_explorer.setup.alerts.field_placeholder",
+            });
 
             const operatorCol = document.createElement("div");
             operatorCol.className = "col-md-3 col-sm-6";
@@ -3655,6 +3920,19 @@
       if (!alert) {
         return;
       }
+      if (button.dataset.action === "apply-advanced-template") {
+        const templateId = button.dataset.templateId;
+        const template = ADVANCED_TEMPLATES.find((entry) => entry.id === templateId);
+        if (template) {
+          const definition = template.build();
+          if (definition) {
+            alert.mode = ADVANCED_ALERT_MODES.ADVANCED;
+            alert.advanced = createAdvancedGroup(definition);
+            renderSetupAlerts();
+          }
+        }
+        return;
+      }
       if (button.dataset.action === "add-advanced-scope") {
         const parentId = button.dataset.parentId || (alert.advanced && alert.advanced.id);
         addAdvancedScope(alert, parentId);
@@ -3764,7 +4042,17 @@
         const found = findAdvancedNodeById(alert, nodeId);
         if (found && found.node && found.node.type === "condition") {
           found.node.object = target.value;
+          found.node.field = "";
+          found.node.value = "";
           renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-field") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "condition") {
+          found.node.field = target.value;
         }
         return;
       }
@@ -3782,7 +4070,25 @@
         const found = findAdvancedNodeById(alert, nodeId);
         if (found && found.node && found.node.type === "aggregate") {
           found.node.object = target.value;
+          found.node.field = "";
+          found.node.distinctField = "";
           renderSetupAlerts();
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-field") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.field = target.value;
+        }
+        return;
+      }
+      if (role === "advanced-aggregate-distinct") {
+        const nodeId = target.dataset.nodeId;
+        const found = findAdvancedNodeById(alert, nodeId);
+        if (found && found.node && found.node.type === "aggregate") {
+          found.node.distinctField = target.value;
         }
         return;
       }
@@ -3802,7 +4108,20 @@
       }
       if (role === "alert-object") {
         filter.object = target.value;
-        loadAlertFieldSuggestions(alertId, filterId);
+        filter.field = "";
+        filter.value = "";
+        populateAlertFieldOptions(alertId, filterId);
+        if (setupAlertList) {
+          const valueSelector = `input[data-role="alert-value"][data-alert-id="${alertId}"][data-filter-id="${filterId}"]`;
+          const valueInput = setupAlertList.querySelector(valueSelector);
+          if (valueInput) {
+            valueInput.value = "";
+          }
+        }
+        return;
+      }
+      if (role === "alert-field") {
+        filter.field = target.value;
         return;
       }
       if (role === "alert-operator") {
@@ -3826,27 +4145,11 @@
         alert.label = target.value;
         return;
       }
-      if (role === "advanced-field") {
-        const nodeId = target.dataset.nodeId;
-        const found = findAdvancedNodeById(alert, nodeId);
-        if (found && found.node && found.node.type === "condition") {
-          found.node.field = target.value;
-        }
-        return;
-      }
       if (role === "advanced-value") {
         const nodeId = target.dataset.nodeId;
         const found = findAdvancedNodeById(alert, nodeId);
         if (found && found.node && found.node.type === "condition") {
           found.node.value = target.value;
-        }
-        return;
-      }
-      if (role === "advanced-aggregate-field") {
-        const nodeId = target.dataset.nodeId;
-        const found = findAdvancedNodeById(alert, nodeId);
-        if (found && found.node && found.node.type === "aggregate") {
-          found.node.field = target.value;
         }
         return;
       }
@@ -3863,57 +4166,14 @@
         }
         return;
       }
-      if (role === "advanced-aggregate-distinct") {
-        const nodeId = target.dataset.nodeId;
-        const found = findAdvancedNodeById(alert, nodeId);
-        if (found && found.node && found.node.type === "aggregate") {
-          found.node.distinctField = target.value;
-        }
-        return;
-      }
       const filterId = target.dataset.filterId;
       const filter = findAlertFilter(alert, filterId);
       if (!filter) {
         return;
       }
-      if (role === "alert-field") {
-        filter.field = target.value;
-      }
       if (role === "alert-value") {
         filter.value = target.value;
       }
-    }
-
-    function handleAlertListFocus(event) {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-      const role = target.dataset.role;
-      if (
-        role !== "advanced-field" &&
-        role !== "advanced-aggregate-field" &&
-        role !== "advanced-aggregate-distinct"
-      ) {
-        return;
-      }
-      const objectKey = target.dataset.object;
-      if (!objectKey) {
-        return;
-      }
-      loadFieldsForObject(objectKey)
-        .then((fields) => {
-          const datalistId = target.getAttribute("list");
-          const datalist = datalistId ? document.getElementById(datalistId) : null;
-          populateDatalistElement(datalist, fields);
-        })
-        .catch((error) => {
-          if (error instanceof Error && error.message === "no_org") {
-            showToast(translateKey("frontend.account_explorer.no_org"), "warning");
-          } else {
-            showToast(translateKey("frontend.account_explorer.fields_failed"), "danger");
-          }
-        });
     }
 
     function openSetupModal() {
@@ -4058,7 +4318,6 @@
       setupAlertList.addEventListener("click", handleAlertListClick);
       setupAlertList.addEventListener("change", handleAlertListChange);
       setupAlertList.addEventListener("input", handleAlertListInput);
-      setupAlertList.addEventListener("focusin", handleAlertListFocus);
     }
     if (setupObjectList) {
       setupObjectList.addEventListener("click", (event) => {
@@ -4116,6 +4375,7 @@
     if (setupOrgSelect) {
       setupOrgSelect.addEventListener("change", () => {
         fieldCache.clear();
+        renderSetupAlerts();
       });
     }
     setupViewInputs.forEach((input) => {
