@@ -226,16 +226,66 @@ def _sanitize_alert_definitions(raw_alerts: Sequence[object]) -> List[Dict[str, 
     return sanitized
 
 CONNECTED_OBJECTS: List[Dict[str, str]] = [
-    {"key": "BillingProfile__c", "label": "Billing Profile"},
-    {"key": "Contact", "label": "Contact"},
-    {"key": "Contract", "label": "Contract"},
-    {"key": "AccountContactRelation", "label": "Account Contact Relation"},
-    {"key": "Individual", "label": "Individual"},
-    {"key": "ContactPointPhone", "label": "Contact Point Phone"},
-    {"key": "ContactPointEmail", "label": "Contact Point Email"},
-    {"key": "Case", "label": "Case"},
-    {"key": "Order", "label": "Order"},
-    {"key": "Sale__c", "label": "Sale"},
+    {
+        "key": "BillingProfile__c",
+        "label": "Billing Profile",
+        "path": ["Account", "Billing Profile"],
+        "path_label": "Account → Billing Profile",
+    },
+    {
+        "key": "Contact",
+        "label": "Contact",
+        "path": ["Account", "Contact"],
+        "path_label": "Account → Contact",
+    },
+    {
+        "key": "Contract",
+        "label": "Contract",
+        "path": ["Account", "Contract"],
+        "path_label": "Account → Contract",
+    },
+    {
+        "key": "AccountContactRelation",
+        "label": "Account Contact Relation",
+        "path": ["Account", "Account Contact Relation"],
+        "path_label": "Account → Account Contact Relation",
+    },
+    {
+        "key": "Individual",
+        "label": "Individual",
+        "path": ["Account", "Individual"],
+        "path_label": "Account → Individual",
+    },
+    {
+        "key": "ContactPointPhone",
+        "label": "Contact Point Phone",
+        "path": ["Account", "Contact", "Contact Point Phone"],
+        "path_label": "Account → Contact → Contact Point Phone",
+    },
+    {
+        "key": "ContactPointEmail",
+        "label": "Contact Point Email",
+        "path": ["Account", "Contact", "Contact Point Email"],
+        "path_label": "Account → Contact → Contact Point Email",
+    },
+    {
+        "key": "Case",
+        "label": "Case",
+        "path": ["Account", "Case"],
+        "path_label": "Account → Case",
+    },
+    {
+        "key": "Order",
+        "label": "Order",
+        "path": ["Account", "Order"],
+        "path_label": "Account → Order",
+    },
+    {
+        "key": "Sale__c",
+        "label": "Sale",
+        "path": ["Account", "Sale"],
+        "path_label": "Account → Sale",
+    },
 ]
 
 _CONNECTED_OBJECT_LOOKUP: Dict[str, Dict[str, str]] = {
